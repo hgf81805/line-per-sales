@@ -6,3 +6,4 @@ __pycache__/
 .netlify/
 .DS_Store
 *.zip
+!public/downloads/personal-line.zip
