@@ -9,6 +9,24 @@ from urllib.parse import urlencode
 import beeper_reader as reader
 
 
+def metadata_page(page):
+    """Immediately discard previews, drafts and unknown fields after JSON decoding.
+
+    This is logical disposal, not a guarantee of physical memory zeroization.
+    No upstream response body is logged or persisted.
+    """
+    result = {'items': [], 'hasMore': bool(page.get('hasMore')),
+              'oldestCursor': page.get('oldestCursor')}
+    for chat in page.get('items') or []:
+        safe = {key: chat.get(key) for key in (
+            'id', 'title', 'type', 'network', 'lastActivity', 'lastActivityAt', 'updatedAt')
+            if isinstance(chat.get(key), (str, int, float, bool))}
+        safe['merge'] = bool(chat.get('merge') or chat.get('mergedIntoChatID'))
+        result['items'].append(safe)
+    page.clear()
+    return result
+
+
 def make_handler(token, port):
     csrf = secrets.token_urlsafe(32)
     host = f'127.0.0.1:{port}'
@@ -58,10 +76,11 @@ def make_handler(token, port):
                     cursor = None
                     seen = set()
                     for _ in range(3):
-                        params = {'type': 'single', 'limit': 200}
+                        params = {'type': 'single', 'limit': 5}
                         if cursor:
                             params.update(cursor=cursor, direction='before')
-                        page = reader.http_json(reader.BEEPER_URL + '/v1/chats/search?' + urlencode(params), token=token)
+                        page = metadata_page(reader.http_json(
+                            reader.BEEPER_URL + '/v1/chats/search?' + urlencode(params), token=token))
                         for c in page.get('items') or []:
                             if c.get('type') != 'single' or (c.get('network') or '').lower() != 'line' or c.get('merge') or c.get('mergedIntoChatID') or not c.get('id'):
                                 continue

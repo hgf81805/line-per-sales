@@ -11,6 +11,18 @@ import personal
 
 
 class PersonalTest(unittest.TestCase):
+    def test_discard_unneeded_chat_fields(self):
+        raw = {'items': [{'id': 'c0', 'title': '相手', 'type': 'single', 'network': 'LINE',
+                          'preview': {'text': 'private preview'},
+                          'draft': {'text': 'private draft'},
+                          'futureField': {'text': 'private future field'}}],
+               'hasMore': True, 'oldestCursor': 'opaque', 'unexpected': 'private root field'}
+        safe = personal.metadata_page(raw)
+        self.assertEqual(raw, {})
+        self.assertEqual(set(safe), {'items', 'hasMore', 'oldestCursor'})
+        self.assertEqual(set(safe['items'][0]), {'id', 'title', 'type', 'network', 'merge'})
+        self.assertNotIn('private', json.dumps(safe))
+
     def setUp(self):
         self.calls = []
         self.server = ThreadingHTTPServer(('127.0.0.1', 0), personal.make_handler('test-token', 1))
