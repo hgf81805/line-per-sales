@@ -2,6 +2,7 @@
 import json
 import secrets
 import threading
+import time
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlencode
@@ -30,6 +31,9 @@ def metadata_page(page):
 def make_handler(token, port):
     csrf = secrets.token_urlsafe(32)
     host = f'127.0.0.1:{port}'
+    public_origin = "https://line-per-line.netlify.app"
+    pairing = {"code": None, "expires": 0, "attempts": 0}
+    sessions = {}
     allowed = {}
     lock = threading.RLock()
 
@@ -43,12 +47,33 @@ def make_handler(token, port):
             self.send_header('Content-Type', 'text/html; charset=utf-8' if html else 'application/json; charset=utf-8')
             self.send_header('Content-Length', str(len(body)))
             self.send_header('Cache-Control', 'no-store')
+            if self.headers.get('Origin') == public_origin:
+                self.send_header('Access-Control-Allow-Origin', public_origin)
+                self.send_header('Vary', 'Origin')
             self.send_header('X-Content-Type-Options', 'nosniff')
             self.send_header('Referrer-Policy', 'no-referrer')
             self.send_header('X-Frame-Options', 'DENY')
             self.send_header('Content-Security-Policy', "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
             self.end_headers()
             self.wfile.write(body)
+
+        def do_OPTIONS(self):
+            if (self.headers.get('Host') != host
+                    or self.headers.get('Origin') != public_origin
+                    or self.path not in ('/api/pair', '/api/chats', '/api/conversation', '/api/suggest', '/api/disconnect')
+                    or self.headers.get('Access-Control-Request-Method') != 'POST'):
+                return self.respond(403, {'error': '許可されていない接続元です。'})
+            requested = {h.strip().lower() for h in self.headers.get('Access-Control-Request-Headers', '').split(',') if h.strip()}
+            if not requested <= {'content-type', 'x-bridge-token'}:
+                return self.respond(403, {'error': '許可されていないヘッダーです。'})
+            self.send_response(204)
+            self.send_header('Access-Control-Allow-Origin', public_origin)
+            self.send_header('Access-Control-Allow-Methods', 'POST')
+            self.send_header('Access-Control-Allow-Headers', 'Content-Type, X-Bridge-Token')
+            self.send_header('Access-Control-Allow-Private-Network', 'true')
+            self.send_header('Vary', 'Origin')
+            self.send_header('Cache-Control', 'no-store')
+            self.end_headers()
 
         def do_GET(self):
             if self.headers.get('Host') != host:
@@ -60,10 +85,22 @@ def make_handler(token, port):
             self.respond(200, page, html=True)
 
         def do_POST(self):
-            if self.headers.get('Host') != host or self.headers.get('Origin') != 'http://' + host or self.headers.get('X-CSRF-Token') != csrf:
-                return self.respond(403, {'error': 'このMacのアプリ画面から操作してください。'})
-            if self.path not in ('/api/chats', '/api/conversation', '/api/suggest'):
+            is_local = (self.headers.get('Origin') == 'http://' + host
+                        and secrets.compare_digest(self.headers.get('X-CSRF-Token', ''), csrf))
+            is_public = self.headers.get('Origin') == public_origin
+            bridge_token = self.headers.get('X-Bridge-Token', '')
+            with lock:
+                now = time.monotonic()
+                for expired in [key for key, expiry in sessions.items() if expiry <= now]:
+                    del sessions[expired]
+                paired = is_public and bridge_token in sessions
+            if self.headers.get('Host') != host or not (is_local or paired or (is_public and self.path == '/api/pair')):
+                return self.respond(403, {'error': 'このMacの画面で接続コードを発行し、公開サイトから接続し直してください。'})
+            routes = ('/api/chats', '/api/conversation', '/api/suggest', '/api/pair', '/api/pair-code', '/api/disconnect')
+            if self.path not in routes:
                 return self.respond(404, {'error': 'このアプリに送信・既読・下書き変更のAPIはありません。'})
+            if self.path == '/api/pair-code' and not is_local:
+                return self.respond(403, {'error': '接続コードはMac内の画面で発行してください。'})
             try:
                 size = int(self.headers.get('Content-Length', '0'))
                 if self.headers.get('Content-Type', '').split(';')[0] != 'application/json' or not 2 <= size <= 4096:
@@ -71,6 +108,31 @@ def make_handler(token, port):
                 data = json.loads(self.rfile.read(size))
                 if not isinstance(data, dict):
                     return self.respond(400, {'error': 'リクエスト形式を確認してください。'})
+                if self.path == '/api/pair-code':
+                    with lock:
+                        pairing.update(code=secrets.token_hex(8), expires=time.monotonic() + 300, attempts=0)
+                        sessions.clear()
+                        return self.respond(200, {'code': pairing['code']})
+                if self.path == '/api/pair':
+                    with lock:
+                        code = data.get('code')
+                        if (not is_public or not isinstance(code, str) or pairing['code'] is None
+                                or pairing['expires'] <= time.monotonic() or pairing['attempts'] >= 5
+                                or not secrets.compare_digest(code, pairing['code'])):
+                            pairing['attempts'] += 1
+                            return self.respond(403, {'error': '接続コードが無効・期限切れです。Mac内の画面で再発行してください。'})
+                        pairing['code'] = None
+                        session = secrets.token_urlsafe(32)
+                        sessions[session] = time.monotonic() + 8 * 3600
+                        return self.respond(200, {'session': session})
+                if self.path == '/api/disconnect':
+                    with lock:
+                        if is_local:
+                            sessions.clear()
+                            pairing['code'] = None
+                        else:
+                            sessions.pop(bridge_token, None)
+                    return self.respond(200, {'ok': True})
                 if self.path == '/api/chats':
                     found = []
                     cursor = None

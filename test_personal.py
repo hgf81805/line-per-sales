@@ -101,6 +101,51 @@ class PersonalTest(unittest.TestCase):
         self.assertEqual(self.api('suggest', {'chat_id': 'c0', 'message_id': 'm1'})[0], 409)
         self.assertFalse(any('/api/generate' in c[0] for c in self.calls))
 
+    def test_public_pairing_is_one_use_and_revocable(self):
+        origin = 'https://line-per-line.netlify.app'
+        self.assertEqual(self.api('chats', Origin=origin)[0], 403)
+        self.assertEqual(self.api('pair-code', Origin=origin)[0], 403)
+        code = self.api('pair-code')[1]['code']
+        self.assertEqual(self.api('pair', {'code': code}, Origin='https://evil.example')[0], 403)
+        status, data = self.api('pair', {'code': code}, Origin=origin)
+        self.assertEqual(status, 200)
+        session = data['session']
+        self.assertNotEqual(session, 'test-token')
+        self.assertEqual(self.api('pair', {'code': code}, Origin=origin)[0], 403)
+        headers = {'Origin': origin, 'X-Bridge-Token': session}
+        self.assertEqual(self.api('chats', **headers)[0], 200)
+        self.assertEqual(self.api('conversation', {'chat_id': 'c0'}, **headers)[0], 200)
+        self.assertEqual(self.api('send', **headers)[0], 404)
+        self.api('disconnect')
+        self.assertEqual(self.api('chats', **headers)[0], 403)
+
+    def test_public_pairing_expires_and_locks_after_failures(self):
+        origin = 'https://line-per-line.netlify.app'
+        code = self.api('pair-code')[1]['code']
+        with patch.object(personal.time, 'monotonic', return_value=10**12):
+            self.assertEqual(self.api('pair', {'code': code}, Origin=origin)[0], 403)
+        code = self.api('pair-code')[1]['code']
+        for _ in range(5):
+            self.assertEqual(self.api('pair', {'code': 'bad'}, Origin=origin)[0], 403)
+        self.assertEqual(self.api('pair', {'code': code}, Origin=origin)[0], 403)
+
+    def test_cors_preflight_only_allows_named_site(self):
+        def preflight(origin, requested='content-type,x-bridge-token'):
+            req = Request(self.url + '/api/chats', method='OPTIONS', headers={
+                'Origin': origin, 'Access-Control-Request-Method': 'POST',
+                'Access-Control-Request-Headers': requested})
+            try:
+                return urlopen(req)
+            except HTTPError as exc:
+                return exc
+        with preflight('https://line-per-line.netlify.app') as res:
+            self.assertEqual(res.status, 204)
+            self.assertEqual(res.headers['Access-Control-Allow-Origin'], 'https://line-per-line.netlify.app')
+        with preflight('https://evil.example') as res:
+            self.assertEqual(res.status, 403)
+            self.assertIsNone(res.headers.get('Access-Control-Allow-Origin'))
+        self.assertEqual(self.calls, [])
+
     def test_no_write_routes_and_cross_origin(self):
         for path in ['send', 'read', 'draft', 'unknown']:
             self.assertEqual(self.api(path)[0], 404)
