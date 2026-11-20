@@ -7,3 +7,7 @@ __pycache__/
 .DS_Store
 *.zip
 !public/downloads/personal-line.zip
+
+.build/
+*.app/
+!public/downloads/line-connector-mac.zip
