@@ -8,6 +8,7 @@ from pathlib import Path
 from urllib.parse import urlencode
 
 import beeper_reader as reader
+from attio_bridge import AttioBridge, AttioError
 from confirmed_send import ConfirmedSender, SendValidationError, conversation_version
 
 
@@ -29,7 +30,8 @@ def metadata_page(page):
     return result
 
 
-def make_handler(token, port, cloud=None, sender=None):
+def make_handler(token, port, cloud=None, sender=None, attio=None):
+    attio = attio or AttioBridge()
     sender = sender or ConfirmedSender()
     csrf = secrets.token_urlsafe(32)
     host = f'127.0.0.1:{port}'
@@ -63,7 +65,7 @@ def make_handler(token, port, cloud=None, sender=None):
         def do_OPTIONS(self):
             if (self.headers.get('Host') != host
                     or self.headers.get('Origin') != public_origin
-                    or self.path not in ('/api/pair', '/api/chats', '/api/conversation', '/api/suggest', '/api/prepare-send', '/api/send', '/api/send-status', '/api/disconnect')
+                    or self.path not in ('/api/pair', '/api/chats', '/api/conversation', '/api/suggest', '/api/prepare-send', '/api/send', '/api/send-status', '/api/disconnect', '/api/attio-list', '/api/attio-linked', '/api/attio-link', '/api/attio-unlink', '/api/attio-create', '/api/attio-stage', '/api/attio-task', '/api/attio-complete')
                     or self.headers.get('Access-Control-Request-Method') != 'POST'):
                 return self.respond(403, {'error': '許可されていない接続元です。'})
             requested = {h.strip().lower() for h in self.headers.get('Access-Control-Request-Headers', '').split(',') if h.strip()}
@@ -81,7 +83,7 @@ def make_handler(token, port, cloud=None, sender=None):
         def do_GET(self):
             if self.headers.get('Host') != host:
                 return self.respond(403, {'error': '接続元を確認できません。127.0.0.1のURLを開いてください。'})
-            assets = {'/cloud.js': ('text/javascript; charset=utf-8', 'cloud.js'), '/cloud-config.json': ('application/json; charset=utf-8', 'cloud-config.json'), '/send.js': ('text/javascript; charset=utf-8', 'send.js')}
+            assets = {'/cloud.js': ('text/javascript; charset=utf-8', 'cloud.js'), '/cloud-config.json': ('application/json; charset=utf-8', 'cloud-config.json'), '/send.js': ('text/javascript; charset=utf-8', 'send.js'), '/attio.js': ('text/javascript; charset=utf-8', 'attio.js')}
             assets.update({
                 '/favicon.ico': ('image/x-icon', 'favicon.ico'),
                 '/favicon.svg': ('image/svg+xml', 'favicon.svg'),
@@ -116,10 +118,10 @@ def make_handler(token, port, cloud=None, sender=None):
                 paired = is_public and bridge_token in sessions
             if self.headers.get('Host') != host or not (is_local or paired or (is_public and self.path == '/api/pair')):
                 return self.respond(403, {'error': 'このMacの画面で接続コードを発行し、公開サイトから接続し直してください。'})
-            routes = ('/api/prepare-send', '/api/send', '/api/send-status', '/api/chats', '/api/conversation', '/api/suggest', '/api/pair', '/api/pair-code', '/api/disconnect', '/api/cloud/status', '/api/cloud/enroll', '/api/cloud/disconnect')
+            routes = ('/api/attio/configure', '/api/attio/disconnect', '/api/attio/status', '/api/attio-list', '/api/attio-linked', '/api/attio-link', '/api/attio-unlink', '/api/attio-create', '/api/attio-stage', '/api/attio-task', '/api/attio-complete', '/api/prepare-send', '/api/send', '/api/send-status', '/api/chats', '/api/conversation', '/api/suggest', '/api/pair', '/api/pair-code', '/api/disconnect', '/api/cloud/status', '/api/cloud/enroll', '/api/cloud/disconnect')
             if self.path not in routes:
                 return self.respond(404, {'error': 'この操作には対応していません。'})
-            if (self.path == '/api/pair-code' or self.path.startswith('/api/cloud/')) and not is_local:
+            if (self.path == '/api/pair-code' or self.path.startswith('/api/cloud/') or self.path.startswith('/api/attio/')) and not is_local:
                 return self.respond(403, {'error': '接続コードはMac内の画面で発行してください。'})
             try:
                 size = int(self.headers.get('Content-Length', '0'))
@@ -128,6 +130,16 @@ def make_handler(token, port, cloud=None, sender=None):
                 data = json.loads(self.rfile.read(size))
                 if not isinstance(data, dict):
                     return self.respond(400, {'error': 'リクエスト形式を確認してください。'})
+                if self.path == '/api/attio/configure':
+                    return self.respond(200, attio.connect(data.get('token')))
+                if self.path == '/api/attio/status':
+                    return self.respond(200, attio.status())
+                if self.path == '/api/attio/disconnect':
+                    return self.respond(200, attio.disconnect())
+                if self.path == '/api/attio-list':
+                    return self.respond(200, attio.page(data.get('offset',0)))
+                if self.path in ('/api/attio-create','/api/attio-stage','/api/attio-task','/api/attio-complete'):
+                    return self.respond(200, attio.mutate(self.path.split('-')[-1], data))
                 if self.path.startswith('/api/cloud/'):
                     if cloud is None:
                         return self.respond(503, {'error': '最新版のMacアプリで起動し直してください。'})
@@ -197,6 +209,13 @@ def make_handler(token, port, cloud=None, sender=None):
                 with lock:
                     if not isinstance(cid, str) or cid not in allowed:
                         return self.respond(400, {'error': '一覧からLINEの1対1トークを選んでください。'})
+                if self.path in ('/api/attio-linked','/api/attio-link','/api/attio-unlink'):
+                    account = sender.chat(token,cid)['account_id']
+                    if self.path == '/api/attio-linked':
+                        return self.respond(200, attio.linked(account,cid))
+                    if self.path == '/api/attio-unlink':
+                        return self.respond(200, attio.unlink(account,cid))
+                    return self.respond(200, attio.link(account,cid,data.get('deal_id')))
                 if self.path == '/api/prepare-send':
                     return self.respond(200, sender.prepare(token, cid, data.get('text'), data.get('conversation_version')))
                 page = reader.message_page(token, cid)
@@ -216,6 +235,8 @@ def make_handler(token, port, cloud=None, sender=None):
                 else:
                     messages = [{'speaker': '自分' if m.get('isSender') else '相手', 'text': m['text'][:1200]} for m in items if reader.keep_message(m)][-20:]
                 return self.respond(200, {'messages': messages, 'message_id': str(target['id']) if target and context else None, 'conversation_version': conversation_version(page)})
+            except AttioError as exc:
+                self.respond(400, {'error': str(exc)})
             except SendValidationError as exc:
                 self.respond(400, {'error': str(exc)})
             except (ValueError, TypeError):

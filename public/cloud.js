@@ -49,12 +49,13 @@ async function loggedIn(){
   deviceTimer=setInterval(()=>loadDevices().catch(e=>notice(e.message)),15000);
 }
 async function cloudJob(action,payload){
-  if(!['chats','conversation','suggest','prepare-send','send','send-status'].includes(action))throw new Error('この操作には対応していません。');
+  if(!['chats','conversation','suggest','prepare-send','send','send-status','attio-list','attio-linked','attio-link','attio-unlink','attio-create','attio-stage','attio-task','attio-complete'].includes(action))throw new Error('この操作には対応していません。');
   const epoch=generation;
   await loadDevices();
   const device=devices.find(d=>d.id===activeDevice);
   if(!device||!device.enabled||Date.now()-new Date(device.last_seen).getTime()>=60000)throw new Error('Macがオフラインです。Mac・Beeper・接続アプリを起動してください。');
   if(['prepare-send','send','send-status'].includes(action)&&!device.capabilities?.includes('confirmed-send-v1'))throw new Error('送信するにはMacアプリを最新版へ更新してください。');
+  if(action.startsWith('attio-')&&!device.capabilities?.includes('attio-crm-v1'))throw new Error('Attioを使うにはMacアプリをv1.5へ更新してください。');
   const [job]=await raw('/rest/v1/line_remote_jobs',{user_id:session.user.id,device_id:activeDevice,action,payload},{headers:{Prefer:'return=representation'}});
   try{
     const deadline=Date.now()+245000;
