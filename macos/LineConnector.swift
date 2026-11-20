@@ -46,6 +46,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let startButton = NSButton(title: "保存して接続アプリを起動", target: nil, action: nil)
     let stopButton = NSButton(title: "接続を停止", target: nil, action: nil)
     let openButton = NSButton(title: "LINEの接続画面を開く", target: nil, action: nil)
+    let forgetButton = NSButton(title: "保存したトークンを削除", target: nil, action: nil)
     let store = CredentialStore(service: "jp.line-per-sales.beeper")
     var server: Process?
     var starting = false
@@ -72,7 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.mainMenu = menu
 
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 570, height: 485), styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
-        window.title = "つながる営業 — Mac接続"
+        window.title = "つながる営業 — Mac接続（送信対応）"
         window.center()
         let title = NSTextField(labelWithString: "LINEを、このMacにつなぐ")
         title.font = .systemFont(ofSize: 24, weight: .semibold)
@@ -95,7 +96,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         openButton.bezelStyle = .rounded
         let publicButton = NSButton(title: "公開サイトを開く", target: self, action: #selector(openPublic))
         publicButton.bezelStyle = .rounded
-        let forgetButton = NSButton(title: "保存したトークンを削除", target: self, action: #selector(forgetToken))
+        forgetButton.target = self; forgetButton.action = #selector(forgetToken)
         forgetButton.bezelStyle = .rounded
         statusLabel.font = .systemFont(ofSize: 14)
         statusLabel.setAccessibilityIdentifier("connectionStatus")
@@ -118,14 +119,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         if !qaMode {
-            do {
-                if let token = try store.load(), !token.isEmpty { startServer(token: token) }
-            } catch { showError(error.localizedDescription) }
+            loadCredential()
         } else { statusLabel.stringValue = "画面確認モード：トークンの読み込み・保存やLINEへの接続は行いません。" }
     }
 
     func updateControls() {
         let running = server?.isRunning ?? false
+        forgetButton.isEnabled = !starting
         startButton.isEnabled = !starting && !running
         stopButton.isEnabled = running
         tokenField.isEnabled = !running && !starting
@@ -136,15 +136,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusLabel.textColor = .systemRed
     }
     @objc func startClicked() {
-        if qaMode { return }
-        do {
-            let typed = tokenField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            let token: String
-            if !typed.isEmpty { try store.save(typed); token = typed; tokenField.stringValue = "" }
-            else if let saved = try store.load(), !saved.isEmpty { token = saved }
-            else { showError("Beeperトークンを入力してください。入力内容はMac内だけに保存します。"); return }
-            startServer(token: token)
-        } catch { showError(error.localizedDescription) }
+        if qaMode || starting { return }
+        let typed = tokenField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        tokenField.stringValue = ""
+        loadCredential(typed: typed.isEmpty ? nil : typed)
+    }
+    func loadCredential(typed: String? = nil) {
+        starting = true; updateControls()
+        statusLabel.textColor = .secondaryLabelColor
+        statusLabel.stringValue = "Macのキーチェーンを確認しています。macOSの確認画面が表示された場合は内容を確認してください。"
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            do {
+                let token: String?
+                if let typed = typed { try self.store.save(typed); token = typed }
+                else { token = try self.store.load() }
+                DispatchQueue.main.async {
+                    guard !self.quitting else { return }
+                    self.starting = false
+                    if let token = token, !token.isEmpty { self.startServer(token: token) }
+                    else {
+                        self.statusLabel.stringValue = "初回だけBeeperトークンを入力してください。"
+                        self.updateControls()
+                    }
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    guard !self.quitting else { return }
+                    self.starting = false
+                    self.showError(error.localizedDescription)
+                    self.updateControls()
+                }
+            }
+        }
     }
     func pythonExecutable() -> String? {
         for path in ["/opt/homebrew/bin/python3.13", "/opt/homebrew/bin/python3", "/usr/local/bin/python3", "/usr/bin/python3"] {
@@ -246,8 +270,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.addButton(withTitle: "削除"); alert.addButton(withTitle: "キャンセル")
         if alert.runModal() == .alertFirstButtonReturn {
             stopClicked()
-            do { try store.delete(); tokenField.stringValue = ""; statusLabel.stringValue = "保存したトークンを削除しました。" }
-            catch { showError(error.localizedDescription) }
+            starting = true; updateControls()
+            statusLabel.stringValue = "キーチェーンの削除を確認しています…"
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                guard let self = self else { return }
+                do {
+                    try self.store.delete()
+                    DispatchQueue.main.async {
+                        guard !self.quitting else { return }
+                        self.starting = false; self.tokenField.stringValue = ""
+                        self.statusLabel.stringValue = "保存したトークンを削除しました。"; self.updateControls()
+                    }
+                } catch {
+                    DispatchQueue.main.async {
+                        guard !self.quitting else { return }
+                        self.starting = false; self.showError(error.localizedDescription); self.updateControls()
+                    }
+                }
+            }
         }
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
