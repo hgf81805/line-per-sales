@@ -5,9 +5,9 @@ from zipfile import ZIP_DEFLATED, ZipFile
 root = Path(__file__).resolve().parent
 target = root / 'public/downloads/personal-line.zip'
 target.parent.mkdir(exist_ok=True)
-files = ['app.py', 'token_store.py', 'test_token_store.py', 'personal.py', 'beeper_reader.py', 'README.md',
+files = ['app.py', 'cloud_relay.py', 'token_store.py', 'test_token_store.py', 'personal.py', 'beeper_reader.py', 'README.md',
          '個人LINE起動.command', 'デモ起動.command', 'test_personal.py',
-         'public/index.html', 'public/demo.html']
+         'public/index.html', 'public/cloud.js', 'public/cloud-config.json', 'public/demo.html']
 with ZipFile(target, 'w', ZIP_DEFLATED) as archive:
     for name in files:
         archive.write(root / name, arcname='personal-line/' + name)

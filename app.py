@@ -48,6 +48,7 @@ def main():
     if not 1 <= args.port <= 65535:
         parser.error('ポート番号は1〜65535で指定してください。')
     handler = Handler
+    cloud = None
     if args.personal:
         from personal import make_handler
         from token_store import get_token, KeychainError
@@ -60,11 +61,33 @@ def main():
             parser.exit(1, str(exc) + '\n')
         except (EOFError, KeyboardInterrupt):
             parser.exit(1, '\nトークンの入力を終了しました。\n')
-        handler = make_handler(token, args.port)
+        from cloud_relay import CloudRelay
+        cloud = CloudRelay()
+        handler = make_handler(token, args.port, cloud=cloud)
     try:
         server = ThreadingHTTPServer(('127.0.0.1', args.port), handler)
     except OSError as exc:
         parser.exit(1, f'起動できませんでした: {exc}\n別のポートをお試しください: python3 app.py --port 8767\n')
+    if cloud is not None:
+        from urllib.request import Request, urlopen
+        from urllib.error import HTTPError
+        import json
+        def dispatch(action, payload):
+            request = Request(f'http://127.0.0.1:{args.port}/api/' + action,
+                data=json.dumps(payload).encode(), method='POST', headers={
+                    'Origin': f'http://127.0.0.1:{args.port}', 'Content-Type': 'application/json',
+                    'X-CSRF-Token': handler.local_csrf})
+            try:
+                response = urlopen(request, timeout=195)
+            except HTTPError as exc:
+                response = exc
+            with response:
+                data = json.loads(response.read(200000))
+                if response.status != 200:
+                    raise RuntimeError(data.get('error', 'Mac内の処理に失敗しました。'))
+                return data
+        cloud.dispatch = dispatch
+        threading.Thread(target=cloud.restore, daemon=True).start()
     if args.token_stdin:
         print('LINE_CONNECTOR_READY', flush=True)
     url = f'http://127.0.0.1:{args.port}'
@@ -76,6 +99,8 @@ def main():
     except KeyboardInterrupt:
         print('\n終了しました。')
     finally:
+        if cloud is not None:
+            cloud.close()
         server.server_close()
 
 

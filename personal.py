@@ -28,7 +28,7 @@ def metadata_page(page):
     return result
 
 
-def make_handler(token, port):
+def make_handler(token, port, cloud=None):
     csrf = secrets.token_urlsafe(32)
     host = f'127.0.0.1:{port}'
     public_origin = "https://line-per-line.netlify.app"
@@ -38,6 +38,7 @@ def make_handler(token, port):
     lock = threading.RLock()
 
     class PersonalHandler(BaseHTTPRequestHandler):
+        local_csrf = csrf
         def log_message(self, *args):
             pass
 
@@ -53,7 +54,7 @@ def make_handler(token, port):
             self.send_header('X-Content-Type-Options', 'nosniff')
             self.send_header('Referrer-Policy', 'no-referrer')
             self.send_header('X-Frame-Options', 'DENY')
-            self.send_header('Content-Security-Policy', "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+            self.send_header('Content-Security-Policy', "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self' https://zfwweszgsrovuiabvzye.supabase.co; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
             self.end_headers()
             self.wfile.write(body)
 
@@ -78,6 +79,17 @@ def make_handler(token, port):
         def do_GET(self):
             if self.headers.get('Host') != host:
                 return self.respond(403, {'error': '接続元を確認できません。127.0.0.1のURLを開いてください。'})
+            assets = {'/cloud.js': ('text/javascript; charset=utf-8', 'cloud.js'), '/cloud-config.json': ('application/json; charset=utf-8', 'cloud-config.json')}
+            if self.path in assets:
+                mime, filename = assets[self.path]
+                body = (Path(__file__).parent / 'public' / filename).read_bytes()
+                self.send_response(200)
+                self.send_header('Content-Type', mime)
+                self.send_header('Content-Length', str(len(body)))
+                self.send_header('Cache-Control', 'no-store')
+                self.send_header('X-Content-Type-Options', 'nosniff')
+                self.end_headers()
+                return self.wfile.write(body)
             if self.path not in ('/', '/index.html'):
                 return self.respond(404, {'error': 'Not found'})
             page = (Path(__file__).parent / 'public/index.html').read_text()
@@ -96,10 +108,10 @@ def make_handler(token, port):
                 paired = is_public and bridge_token in sessions
             if self.headers.get('Host') != host or not (is_local or paired or (is_public and self.path == '/api/pair')):
                 return self.respond(403, {'error': 'このMacの画面で接続コードを発行し、公開サイトから接続し直してください。'})
-            routes = ('/api/chats', '/api/conversation', '/api/suggest', '/api/pair', '/api/pair-code', '/api/disconnect')
+            routes = ('/api/chats', '/api/conversation', '/api/suggest', '/api/pair', '/api/pair-code', '/api/disconnect', '/api/cloud/status', '/api/cloud/enroll', '/api/cloud/disconnect')
             if self.path not in routes:
                 return self.respond(404, {'error': 'このアプリに送信・既読・下書き変更のAPIはありません。'})
-            if self.path == '/api/pair-code' and not is_local:
+            if (self.path == '/api/pair-code' or self.path.startswith('/api/cloud/')) and not is_local:
                 return self.respond(403, {'error': '接続コードはMac内の画面で発行してください。'})
             try:
                 size = int(self.headers.get('Content-Length', '0'))
@@ -108,6 +120,14 @@ def make_handler(token, port):
                 data = json.loads(self.rfile.read(size))
                 if not isinstance(data, dict):
                     return self.respond(400, {'error': 'リクエスト形式を確認してください。'})
+                if self.path.startswith('/api/cloud/'):
+                    if cloud is None:
+                        return self.respond(503, {'error': '最新版のMacアプリで起動し直してください。'})
+                    if self.path == '/api/cloud/enroll':
+                        return self.respond(200, cloud.enroll(data.get('email'), data.get('password')))
+                    if self.path == '/api/cloud/disconnect':
+                        return self.respond(200, cloud.disconnect())
+                    return self.respond(200, cloud.get_status())
                 if self.path == '/api/pair-code':
                     with lock:
                         pairing.update(code=secrets.token_hex(8), expires=time.monotonic() + 300, attempts=0)

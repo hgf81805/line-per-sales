@@ -15,10 +15,11 @@ def build(destination):
     macos.mkdir(parents=True, exist_ok=True)
     connector = resources / 'connector'
     connector.mkdir(parents=True, exist_ok=True)
-    for name in ('app.py', 'personal.py', 'beeper_reader.py', 'token_store.py'):
+    for name in ('app.py', 'personal.py', 'beeper_reader.py', 'token_store.py', 'cloud_relay.py'):
         shutil.copyfile(ROOT / name, connector / name)
     (connector / 'public').mkdir(exist_ok=True)
-    shutil.copyfile(ROOT / 'public/index.html', connector / 'public/index.html')
+    for name in ('index.html', 'cloud.js', 'cloud-config.json'):
+        shutil.copyfile(ROOT / 'public' / name, connector / 'public' / name)
     cache = ROOT / '.build/module-cache'
     cache.mkdir(parents=True, exist_ok=True)
     executable = macos / 'LineConnector'
@@ -30,8 +31,8 @@ def build(destination):
                       'CFBundleIdentifier': 'jp.line-per-sales.connector',
                       'CFBundleName': 'つながる営業',
                       'CFBundleDisplayName': 'つながる営業',
-                      'CFBundlePackageType': 'APPL', 'CFBundleShortVersionString': '1.2.0',
-                      'CFBundleVersion': '3', 'LSMinimumSystemVersion': '13.0',
+                      'CFBundlePackageType': 'APPL', 'CFBundleShortVersionString': '1.3.0',
+                      'CFBundleVersion': '4', 'LSMinimumSystemVersion': '13.0',
                       'NSHighResolutionCapable': True,
                       'NSLocalNetworkUsageDescription': 'このMac内のBeeperと接続して、選択したLINEトークを読み取ります。'}, f)
     subprocess.run(['/usr/bin/codesign', '--force', '--sign', '-', '--identifier',

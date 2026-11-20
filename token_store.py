@@ -29,6 +29,8 @@ def _apis():
     security.SecKeychainItemModifyAttributesAndData.restype = ctypes.c_int32
     security.SecKeychainItemFreeContent.argtypes = [pointer, pointer]
     security.SecKeychainItemFreeContent.restype = ctypes.c_int32
+    security.SecKeychainItemDelete.argtypes = [pointer]
+    security.SecKeychainItemDelete.restype = ctypes.c_int32
     core.CFRelease.argtypes = [pointer]
     core.CFRelease.restype = None
     return security, core
@@ -39,11 +41,11 @@ def _check(status):
         raise KeychainError(f'キーチェーンを利用できません（OSStatus {status}）。Macのキーチェーンのロックとアクセス許可を確認してください。')
 
 
-def load_token():
+def load_token(service=SERVICE):
     security, _ = _apis()
     size = ctypes.c_uint32()
     data = ctypes.c_void_p()
-    status = security.SecKeychainFindGenericPassword(None, len(SERVICE), SERVICE, len(ACCOUNT), ACCOUNT, ctypes.byref(size), ctypes.byref(data), None)
+    status = security.SecKeychainFindGenericPassword(None, len(service), service, len(ACCOUNT), ACCOUNT, ctypes.byref(size), ctypes.byref(data), None)
     if status == NOT_FOUND:
         return None
     _check(status)
@@ -53,15 +55,15 @@ def load_token():
         security.SecKeychainItemFreeContent(None, data)
 
 
-def save_token(token):
+def save_token(token, service=SERVICE):
     security, core = _apis()
     value = token.encode('utf-8')
     if not value:
         raise KeychainError('空のトークンは保存できません。')
     item = ctypes.c_void_p()
-    status = security.SecKeychainFindGenericPassword(None, len(SERVICE), SERVICE, len(ACCOUNT), ACCOUNT, None, None, ctypes.byref(item))
+    status = security.SecKeychainFindGenericPassword(None, len(service), service, len(ACCOUNT), ACCOUNT, None, None, ctypes.byref(item))
     if status == NOT_FOUND:
-        _check(security.SecKeychainAddGenericPassword(None, len(SERVICE), SERVICE, len(ACCOUNT), ACCOUNT, len(value), ctypes.c_char_p(value), None))
+        _check(security.SecKeychainAddGenericPassword(None, len(service), service, len(ACCOUNT), ACCOUNT, len(value), ctypes.c_char_p(value), None))
         return
     _check(status)
     try:
@@ -86,3 +88,16 @@ def get_token(replace=False):
     save_token(token)
     print('BeeperトークンをMacのキーチェーンに保存しました。次回から自動接続します。')
     return token
+
+
+def delete_token(service=SERVICE):
+    security, core = _apis()
+    item = ctypes.c_void_p()
+    status = security.SecKeychainFindGenericPassword(None, len(service), service, len(ACCOUNT), ACCOUNT, None, None, ctypes.byref(item))
+    if status == NOT_FOUND:
+        return
+    _check(status)
+    try:
+        _check(security.SecKeychainItemDelete(item))
+    finally:
+        core.CFRelease(item)

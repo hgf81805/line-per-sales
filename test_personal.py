@@ -150,6 +150,8 @@ class PersonalTest(unittest.TestCase):
         for path in ['send', 'read', 'draft', 'unknown']:
             self.assertEqual(self.api(path)[0], 404)
         self.assertEqual(self.api('chats', Origin='https://evil.example')[0], 403)
+        self.assertEqual(self.api('cloud/enroll', {'email': 'a', 'password': 'b'}, Origin='https://line-per-line.netlify.app')[0], 403)
+        self.assertEqual(self.api('cloud/status')[0], 503)
         self.assertEqual(self.api('chats', **{'X-CSRF-Token': 'bad'})[0], 403)
         self.assertEqual(self.api('chats', Host='evil.example')[0], 403)
         self.assertEqual(self.api('conversation', {'chat_id': 'unlisted'})[0], 400)
