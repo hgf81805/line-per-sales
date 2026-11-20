@@ -54,7 +54,7 @@ def make_handler(token, port, cloud=None):
             self.send_header('X-Content-Type-Options', 'nosniff')
             self.send_header('Referrer-Policy', 'no-referrer')
             self.send_header('X-Frame-Options', 'DENY')
-            self.send_header('Content-Security-Policy', "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self' https://zfwweszgsrovuiabvzye.supabase.co; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+            self.send_header('Content-Security-Policy', "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://zfwweszgsrovuiabvzye.supabase.co; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
             self.end_headers()
             self.wfile.write(body)
 
@@ -80,8 +80,14 @@ def make_handler(token, port, cloud=None):
             if self.headers.get('Host') != host:
                 return self.respond(403, {'error': '接続元を確認できません。127.0.0.1のURLを開いてください。'})
             assets = {'/cloud.js': ('text/javascript; charset=utf-8', 'cloud.js'), '/cloud-config.json': ('application/json; charset=utf-8', 'cloud-config.json')}
-            if self.path in assets:
-                mime, filename = assets[self.path]
+            assets.update({
+                '/favicon.ico': ('image/x-icon', 'favicon.ico'),
+                '/favicon.svg': ('image/svg+xml', 'favicon.svg'),
+                '/favicon-32.png': ('image/png', 'favicon-32.png'),
+                '/apple-touch-icon.png': ('image/png', 'apple-touch-icon.png')})
+            asset_path = self.path.split('?', 1)[0]
+            if asset_path in assets:
+                mime, filename = assets[asset_path]
                 body = (Path(__file__).parent / 'public' / filename).read_bytes()
                 self.send_response(200)
                 self.send_header('Content-Type', mime)

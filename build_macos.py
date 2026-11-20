@@ -18,7 +18,7 @@ def build(destination):
     for name in ('app.py', 'personal.py', 'beeper_reader.py', 'token_store.py', 'cloud_relay.py'):
         shutil.copyfile(ROOT / name, connector / name)
     (connector / 'public').mkdir(exist_ok=True)
-    for name in ('index.html', 'cloud.js', 'cloud-config.json'):
+    for name in ('index.html', 'cloud.js', 'cloud-config.json', 'favicon.ico', 'favicon.svg', 'favicon-32.png', 'apple-touch-icon.png'):
         shutil.copyfile(ROOT / 'public' / name, connector / 'public' / name)
     cache = ROOT / '.build/module-cache'
     cache.mkdir(parents=True, exist_ok=True)

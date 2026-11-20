@@ -14,6 +14,16 @@ ROOT = Path(__file__).resolve().parent
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
+        asset = self.path.split('?', 1)[0]
+        icons = {'/favicon.ico': 'image/x-icon', '/favicon.svg': 'image/svg+xml', '/favicon-32.png': 'image/png', '/apple-touch-icon.png': 'image/png'}
+        if asset in icons:
+            body = (ROOT / 'public' / asset[1:]).read_bytes()
+            self.send_response(200)
+            self.send_header('Content-Type', icons[asset])
+            self.send_header('Content-Length', str(len(body)))
+            self.send_header('X-Content-Type-Options', 'nosniff')
+            self.end_headers()
+            return self.wfile.write(body)
         if self.path not in ('/', '/index.html', '/healthz'):
             self.send_error(404)
             return
