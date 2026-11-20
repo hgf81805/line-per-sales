@@ -57,6 +57,7 @@ async function cloudJob(action,payload){
   if(!device||!device.enabled||Date.now()-new Date(device.last_seen).getTime()>=60000)throw new Error('Macがオフラインです。Mac・Beeper・接続アプリを起動してください。');
   if(['prepare-send','send','send-status'].includes(action)&&!device.capabilities?.includes('confirmed-send-v1'))throw new Error('送信するにはMacアプリを最新版へ更新してください。');
   if(action.startsWith('attio-')&&!device.capabilities?.includes('attio-crm-v1'))throw new Error('Attioを使うにはMacアプリをv1.5へ更新してください。');
+  if(action==='attio-list'&&payload.source&&!device.capabilities?.includes('attio-directory-v1'))throw new Error('会社・連絡先を取得するにはMacアプリをv1.6へ更新してください。');
   const [job]=await raw('/rest/v1/line_remote_jobs',{user_id:session.user.id,device_id:activeDevice,action,payload},{headers:{Prefer:'return=representation'}});
   try{
     const deadline=Date.now()+245000;

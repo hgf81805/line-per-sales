@@ -42,6 +42,19 @@ def slim_deal(record):
             'stage_since':stage.get('active_from'),'owner_id':first('owner').get('referenced_actor_id'),'url':record.get('web_url'),
             'value':first('value').get('currency_value'),'currency':first('value').get('currency_code')}
 
+def slim_directory(record,source):
+    values=record.get('values') or {}
+    first=lambda key:(values.get(key) or [{}])[0]
+    if source=='people':
+        name=first('name').get('full_name') or ' '.join(filter(None,(first('name').get('first_name'),first('name').get('last_name'))))
+        detail=first('email_addresses').get('email_address') or ''
+    else:
+        name=first('name').get('value')
+        detail=first('domains').get('domain') or ''
+    return {'id':record['id']['record_id'],'name':name or detail or '名称未設定',
+            'detail':detail,'job_title':first('job_title').get('value') if source=='people' else None,
+            'url':record.get('web_url')}
+
 class AttioBridge:
     def __init__(self, path=None):
         self.path=Path(path) if path else Path.home()/'Library/Application Support/つながる営業/attio-links.sqlite3'
@@ -105,10 +118,14 @@ class AttioBridge:
     def members(self):
         return [{'id':m['id']['workspace_member_id'],'name':(m.get('first_name','')+' '+m.get('last_name','')).strip() or m.get('email_address') or '担当者'} for m in self.http('/v2/workspace_members').get('data',[])]
 
-    def page(self,offset=0):
+    def page(self,offset=0,source='deals'):
         if not isinstance(offset,int) or not 0<=offset<=100000:raise AttioError('一覧ページを確認してください。')
+        if source not in ('deals','companies','people'):raise AttioError('取得するデータの種類を選んでください。')
         profile=self.identity()
-        records=self.http('/v2/objects/deals/records/query',{'limit':50,'offset':offset,'sorts':[{'attribute':'created_at','direction':'desc'}]},'POST').get('data',[])
+        records=self.http('/v2/objects/'+source+'/records/query',{'limit':50,'offset':offset,'sorts':[{'attribute':'created_at','direction':'desc'}]},'POST').get('data',[])
+        if source!='deals':
+            return {'source':source,'profile':profile,'records':[slim_directory(r,source) for r in records],
+                    'offset':offset,'has_more':len(records)==50}
         return {'profile':profile,'stages':self.stages(),'members':self.members(),
                 'deals':[slim_deal(r) for r in records],'offset':offset,'has_more':len(records)==50}
 

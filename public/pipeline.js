@@ -58,7 +58,7 @@ async function load(append=false){
     for(const member of members){const option=element('option',member.name);option.value=member.id;$('boardOwner').append(option);}if(members.some(m=>m.id===previous))$('boardOwner').value=previous;
     $('boardSummary').textContent=(data.profile.workspace_name||'Attio')+' · 最終取得 '+new Date().toLocaleString('ja-JP');render();
   }catch(e){if(current===epoch){$('error').textContent=e.message;$('boardNotice').textContent=loaded?'更新できませんでした。前回取得した案件を表示しています。':'案件を取得できませんでした。Macの接続とAttio設定を確認してください。';}}
-  finally{loading=false;controls();}
+  finally{loading=false;controls();window.dispatchEvent(new Event('pipelineupdated'));}
 }
 $('boardRefresh').onclick=()=>load();$('boardMore').onclick=()=>load(true);
 $('boardSearch').oninput=render;$('boardOwner').onchange=render;

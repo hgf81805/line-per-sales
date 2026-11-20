@@ -55,6 +55,27 @@ class AttioTest(unittest.TestCase):
         with self.assertRaises(AttioError):self.bridge.mutate('stage',{'deal_id':DEAL,'stage_id':ACTIVE})
         self.assertEqual(self.writes,[])
 
+    def test_directory_returns_only_display_fields_and_validates_source(self):
+        company={'id':{'record_id':DEAL},'web_url':'https://app.attio.com/test/company','values':{
+            'name':[{'value':'Test company'}],'domains':[{'domain':'example.invalid'}],
+            'description':[{'value':'Do not transfer this field'}]}}
+        self.bridge.http=Mock(return_value={'data':[company]})
+        result=self.bridge.page(50,'companies')
+        self.assertEqual(result['source'],'companies')
+        self.assertEqual(result['records'][0]['detail'],'example.invalid')
+        self.assertNotIn('description',str(result))
+        self.assertEqual(self.bridge.http.call_args.args[0],'/v2/objects/companies/records/query')
+        self.assertEqual(self.bridge.http.call_args.args[1]['offset'],50)
+        person={'id':{'record_id':DEAL},'values':{'name':[{'full_name':'Test person'}],
+            'email_addresses':[{'email_address':'test@example.invalid'}],'job_title':[{'value':'Sales'}]}}
+        self.bridge.http.return_value={'data':[person]}
+        result=self.bridge.page(source='people')
+        self.assertEqual(result['records'][0]['name'],'Test person')
+        self.assertEqual(result['records'][0]['job_title'],'Sales')
+        self.bridge.http.reset_mock()
+        with self.assertRaises(AttioError):self.bridge.page(source='../tasks')
+        self.bridge.http.assert_not_called()
+
     def test_stage_changes_only_stage_and_checks_current_value(self):
         data=self.command(deal_id=DEAL,stage_id=ACTIVE,expected_stage_id=LEAD)
         self.bridge.mutate('stage',data)

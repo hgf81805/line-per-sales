@@ -84,6 +84,7 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
             if self.headers.get('Host') != host:
                 return self.respond(403, {'error': '接続元を確認できません。127.0.0.1のURLを開いてください。'})
             assets = {'/cloud.js': ('text/javascript; charset=utf-8', 'cloud.js'), '/cloud-config.json': ('application/json; charset=utf-8', 'cloud-config.json'), '/send.js': ('text/javascript; charset=utf-8', 'send.js'), '/attio.js': ('text/javascript; charset=utf-8', 'attio.js'), '/pipeline.js': ('text/javascript; charset=utf-8', 'pipeline.js')}
+            assets['/directory.js'] = ('text/javascript; charset=utf-8', 'directory.js')
             assets.update({
                 '/favicon.ico': ('image/x-icon', 'favicon.ico'),
                 '/favicon.svg': ('image/svg+xml', 'favicon.svg'),
@@ -138,7 +139,7 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
                 if self.path == '/api/attio/disconnect':
                     return self.respond(200, attio.disconnect())
                 if self.path == '/api/attio-list':
-                    return self.respond(200, attio.page(data.get('offset',0)))
+                    return self.respond(200, attio.page(data.get('offset',0),data.get('source','deals')))
                 if self.path in ('/api/attio-create','/api/attio-stage','/api/attio-task','/api/attio-complete'):
                     return self.respond(200, attio.mutate(self.path.split('-')[-1], data))
                 if self.path.startswith('/api/cloud/'):
