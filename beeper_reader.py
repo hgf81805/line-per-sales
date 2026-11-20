@@ -1,5 +1,5 @@
 """Beeper reads and local Ollama generation, extracted from the supplied app.
-No Beeper write endpoints are used.
+Sending is implemented separately by confirmed_send with explicit confirmation.
 """
 import json
 import os

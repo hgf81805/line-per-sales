@@ -1,4 +1,4 @@
-"""Loopback-only personal LINE UI. Beeper operations are strictly GET-only."""
+"""Loopback-only personal LINE UI. Text sending requires a short-lived confirmation ticket."""
 import json
 import secrets
 import threading
@@ -8,6 +8,7 @@ from pathlib import Path
 from urllib.parse import urlencode
 
 import beeper_reader as reader
+from confirmed_send import ConfirmedSender, SendValidationError, conversation_version
 
 
 def metadata_page(page):
@@ -28,7 +29,8 @@ def metadata_page(page):
     return result
 
 
-def make_handler(token, port, cloud=None):
+def make_handler(token, port, cloud=None, sender=None):
+    sender = sender or ConfirmedSender()
     csrf = secrets.token_urlsafe(32)
     host = f'127.0.0.1:{port}'
     public_origin = "https://line-per-line.netlify.app"
@@ -61,7 +63,7 @@ def make_handler(token, port, cloud=None):
         def do_OPTIONS(self):
             if (self.headers.get('Host') != host
                     or self.headers.get('Origin') != public_origin
-                    or self.path not in ('/api/pair', '/api/chats', '/api/conversation', '/api/suggest', '/api/disconnect')
+                    or self.path not in ('/api/pair', '/api/chats', '/api/conversation', '/api/suggest', '/api/prepare-send', '/api/send', '/api/send-status', '/api/disconnect')
                     or self.headers.get('Access-Control-Request-Method') != 'POST'):
                 return self.respond(403, {'error': '許可されていない接続元です。'})
             requested = {h.strip().lower() for h in self.headers.get('Access-Control-Request-Headers', '').split(',') if h.strip()}
@@ -79,7 +81,7 @@ def make_handler(token, port, cloud=None):
         def do_GET(self):
             if self.headers.get('Host') != host:
                 return self.respond(403, {'error': '接続元を確認できません。127.0.0.1のURLを開いてください。'})
-            assets = {'/cloud.js': ('text/javascript; charset=utf-8', 'cloud.js'), '/cloud-config.json': ('application/json; charset=utf-8', 'cloud-config.json')}
+            assets = {'/cloud.js': ('text/javascript; charset=utf-8', 'cloud.js'), '/cloud-config.json': ('application/json; charset=utf-8', 'cloud-config.json'), '/send.js': ('text/javascript; charset=utf-8', 'send.js')}
             assets.update({
                 '/favicon.ico': ('image/x-icon', 'favicon.ico'),
                 '/favicon.svg': ('image/svg+xml', 'favicon.svg'),
@@ -114,14 +116,14 @@ def make_handler(token, port, cloud=None):
                 paired = is_public and bridge_token in sessions
             if self.headers.get('Host') != host or not (is_local or paired or (is_public and self.path == '/api/pair')):
                 return self.respond(403, {'error': 'このMacの画面で接続コードを発行し、公開サイトから接続し直してください。'})
-            routes = ('/api/chats', '/api/conversation', '/api/suggest', '/api/pair', '/api/pair-code', '/api/disconnect', '/api/cloud/status', '/api/cloud/enroll', '/api/cloud/disconnect')
+            routes = ('/api/prepare-send', '/api/send', '/api/send-status', '/api/chats', '/api/conversation', '/api/suggest', '/api/pair', '/api/pair-code', '/api/disconnect', '/api/cloud/status', '/api/cloud/enroll', '/api/cloud/disconnect')
             if self.path not in routes:
-                return self.respond(404, {'error': 'このアプリに送信・既読・下書き変更のAPIはありません。'})
+                return self.respond(404, {'error': 'この操作には対応していません。'})
             if (self.path == '/api/pair-code' or self.path.startswith('/api/cloud/')) and not is_local:
                 return self.respond(403, {'error': '接続コードはMac内の画面で発行してください。'})
             try:
                 size = int(self.headers.get('Content-Length', '0'))
-                if self.headers.get('Content-Type', '').split(';')[0] != 'application/json' or not 2 <= size <= 4096:
+                if self.headers.get('Content-Type', '').split(';')[0] != 'application/json' or not 2 <= size <= 16384:
                     return self.respond(400, {'error': 'リクエスト形式を確認してください。'})
                 data = json.loads(self.rfile.read(size))
                 if not isinstance(data, dict):
@@ -185,10 +187,18 @@ def make_handler(token, port, cloud=None):
                         allowed.clear()
                         allowed.update({c['id']: c for c in found})
                     return self.respond(200, {'chats': found})
+                if self.path in ('/api/send','/api/send-status') and set(data) != {'ticket_id'}:
+                    raise ValueError('送信確認の情報を確認してください。')
+                if self.path == '/api/send-status':
+                    return self.respond(200, sender.status(data.get('ticket_id')))
+                if self.path == '/api/send':
+                    return self.respond(200, sender.send(token, data.get('ticket_id')))
                 cid = data.get('chat_id')
                 with lock:
                     if not isinstance(cid, str) or cid not in allowed:
                         return self.respond(400, {'error': '一覧からLINEの1対1トークを選んでください。'})
+                if self.path == '/api/prepare-send':
+                    return self.respond(200, sender.prepare(token, cid, data.get('text'), data.get('conversation_version')))
                 page = reader.message_page(token, cid)
                 items = sorted(page.get('items') or [], key=reader.message_order)
                 target = reader.last_inbound(items)
@@ -205,7 +215,9 @@ def make_handler(token, port, cloud=None):
                     messages = context['history'] + [context['reply_to']]
                 else:
                     messages = [{'speaker': '自分' if m.get('isSender') else '相手', 'text': m['text'][:1200]} for m in items if reader.keep_message(m)][-20:]
-                return self.respond(200, {'messages': messages, 'message_id': str(target['id']) if target and context else None})
+                return self.respond(200, {'messages': messages, 'message_id': str(target['id']) if target and context else None, 'conversation_version': conversation_version(page)})
+            except SendValidationError as exc:
+                self.respond(400, {'error': str(exc)})
             except (ValueError, TypeError):
                 self.respond(400, {'error': 'データ形式を確認できませんでした。'})
             except Exception as exc:

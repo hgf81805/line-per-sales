@@ -28,7 +28,7 @@ async function accessToken(){
   await refreshPromise;return session.access_token;
 }
 function resetRemote(){
-  generation++;cloudActive=false;activeDevice=null;selected=null;messageId=null;
+  generation++;cloudActive=false;activeDevice=null;selected=null;messageId=null;conversationVersion=null;
   ['chats','history','candidates'].forEach(id=>$(id).textContent='');$('name').textContent='相手を選んでください';
   if(!local){$('connected').classList.add('hidden');$('setup').classList.remove('hidden');}
   $('cloudLoggedIn').classList.add('hidden');$('cloudLogin').classList.remove('hidden');
@@ -36,11 +36,11 @@ function resetRemote(){
 }
 async function loadDevices(){
   if(!session)return;
-  devices=await raw('/rest/v1/line_remote_devices?select=id,name,last_seen,enabled&order=last_seen.desc',undefined,{method:'GET'});
+  devices=await raw('/rest/v1/line_remote_devices?select=id,name,last_seen,enabled,capabilities&order=last_seen.desc',undefined,{method:'GET'});
   const select=$('cloudDevice');const previous=select.value;select.replaceChildren();
   for(const d of devices){const option=document.createElement('option');option.value=d.id;option.textContent=d.name+' · '+(d.enabled&&Date.now()-new Date(d.last_seen).getTime()<60000?'オンライン':'オフライン');select.appendChild(option);}
   if(devices.some(d=>d.id===previous))select.value=previous;
-  $('cloudUse').disabled=!devices.length;
+  $('cloudUse').disabled=busy||!devices.length;
   notice(devices.length?'接続するMacを選んでください。':'登録されたMacがありません。Macアプリを開き、その接続画面で同じアカウントにログインしてリモート接続を有効にしてください。');
 }
 async function loggedIn(){
@@ -49,11 +49,12 @@ async function loggedIn(){
   deviceTimer=setInterval(()=>loadDevices().catch(e=>notice(e.message)),15000);
 }
 async function cloudJob(action,payload){
-  if(!['chats','conversation','suggest'].includes(action))throw new Error('この操作には対応していません。');
+  if(!['chats','conversation','suggest','prepare-send','send','send-status'].includes(action))throw new Error('この操作には対応していません。');
   const epoch=generation;
   await loadDevices();
   const device=devices.find(d=>d.id===activeDevice);
   if(!device||!device.enabled||Date.now()-new Date(device.last_seen).getTime()>=60000)throw new Error('Macがオフラインです。Mac・Beeper・接続アプリを起動してください。');
+  if(['prepare-send','send','send-status'].includes(action)&&!device.capabilities?.includes('confirmed-send-v1'))throw new Error('送信するにはMacアプリを最新版へ更新してください。');
   const [job]=await raw('/rest/v1/line_remote_jobs',{user_id:session.user.id,device_id:activeDevice,action,payload},{headers:{Prefer:'return=representation'}});
   try{
     const deadline=Date.now()+245000;
@@ -95,14 +96,15 @@ $('cloudSignup').onclick=async()=>{
   catch(e){notice(e.message);}finally{$('cloudSignup').disabled=false;}
 };
 $('cloudUse').onclick=()=>{
+  if(busy)return;
   const id=$('cloudDevice').value;
-  if(activeDevice!==id){selected=null;messageId=null;['history','candidates','chats'].forEach(x=>$(x).textContent='');$('name').textContent='相手を選んでください';}
+  if(activeDevice!==id){selected=null;messageId=null;conversationVersion=null;['history','candidates','chats'].forEach(x=>$(x).textContent='');$('name').textContent='相手を選んでください';}
   generation++;activeDevice=id;cloudActive=true;bridgeToken=null;showConnected();controls();
-  document.querySelector('#connected .badge').textContent='クラウド経由 · 送信不可';
+  document.querySelector('#connected .badge').textContent='クラウド経由 · 確認して送信';
   $('status').textContent='「LINE一覧を取得」を押してください。';
 };
 $('cloudRefresh').onclick=()=>loadDevices().catch(e=>notice(e.message));
-$('cloudLogout').onclick=async()=>{try{await raw('/auth/v1/logout?scope=local');}catch(e){}finally{forgetSession();resetRemote();notice('ログアウトしました。');}};
+$('cloudLogout').onclick=async()=>{if(busy)return;try{await raw('/auth/v1/logout?scope=local');}catch(e){}finally{forgetSession();resetRemote();notice('ログアウトしました。');}};
 async function localStatus(){
   const response=await fetch('/api/cloud/status',{method:'POST',cache:'no-store',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},body:'{}'});
   const state=await response.json();if(!response.ok)throw new Error(state.error||'Macの接続状態を取得できません。');

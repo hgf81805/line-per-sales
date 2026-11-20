@@ -44,10 +44,10 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='営業デモ / 個人LINEの読み取り専用アプリ')
+    parser = argparse.ArgumentParser(description='営業デモ / 個人LINEの確認付き返信アプリ')
     parser.add_argument('--port', type=int, default=int(os.getenv('LINE_ASSISTANT_PORT', '8766')))
     parser.add_argument('--no-browser', action='store_true')
-    parser.add_argument('--personal', action='store_true', help='Beeperで個人LINEを読み取り（送信不可）')
+    parser.add_argument('--personal', action='store_true', help='Beeperで個人LINEを読み取り、確認して送信')
     parser.add_argument('--replace-token', action='store_true', help='保存済みのBeeperトークンを入れ替える（--personal用）')
     parser.add_argument('--token-stdin', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args()
@@ -84,7 +84,7 @@ def main():
         import json
         def dispatch(action, payload):
             request = Request(f'http://127.0.0.1:{args.port}/api/' + action,
-                data=json.dumps(payload).encode(), method='POST', headers={
+                data=json.dumps(payload, ensure_ascii=False).encode(), method='POST', headers={
                     'Origin': f'http://127.0.0.1:{args.port}', 'Content-Type': 'application/json',
                     'X-CSRF-Token': handler.local_csrf})
             try:
@@ -101,7 +101,7 @@ def main():
     if args.token_stdin:
         print('LINE_CONNECTOR_READY', flush=True)
     url = f'http://127.0.0.1:{args.port}'
-    print(f'{"個人LINE・読み取り専用" if args.personal else "営業・公式LINE デモ"}: {url}\n送信・既読・LINE側の下書き変更なし\n終了: Control + C', flush=True)
+    print(f'{"個人LINE・確認して送信" if args.personal else "営業・公式LINE デモ"}: {url}\n送信は確認画面で承認した本文のみ。既読・LINE下書き変更なし\n終了: Control + C', flush=True)
     if not args.no_browser:
         threading.Timer(0.5, lambda: webbrowser.open(url)).start()
     try:

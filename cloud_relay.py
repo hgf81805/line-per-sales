@@ -107,6 +107,7 @@ class CloudRelay:
             user_id = self.credentials['user_id']
         result = self.http('/rest/v1/line_remote_devices?on_conflict=id', {
             'id': device_id, 'user_id': user_id, 'name': platform.node()[:100] or 'Mac',
+            'capabilities': ['read', 'confirmed-send-v1'],
             'last_seen': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), 'enabled': True,
         }, headers={'Prefer': 'resolution=merge-duplicates,return=minimal'})
         with self.lock:
@@ -126,11 +127,11 @@ class CloudRelay:
 
     def execute_job(self, job):
         action, payload = job.get('action'), job.get('payload')
-        if action not in ('chats', 'conversation', 'suggest') or not isinstance(payload, dict):
+        if action not in ('chats', 'conversation', 'suggest', 'prepare-send', 'send', 'send-status') or not isinstance(payload, dict):
             raise CloudError('この操作には対応していません。')
         # Do not forward arbitrary URL paths, headers, Beeper tokens or unknown arguments.
-        permitted = {'chats': set(), 'conversation': {'chat_id'}, 'suggest': {'chat_id', 'message_id'}}[action]
-        if set(payload) - permitted:
+        permitted = {'chats': set(), 'conversation': {'chat_id'}, 'suggest': {'chat_id', 'message_id'}, 'prepare-send': {'chat_id','text','conversation_version'}, 'send': {'ticket_id'}, 'send-status': {'ticket_id'}}[action]
+        if set(payload) - permitted or (action in ('prepare-send','send','send-status') and set(payload) != permitted):
             raise CloudError('操作の入力が不正です。')
         if self.stop_event.is_set() or not self.dispatch:
             raise CloudError('Macの接続が停止しています。')

@@ -115,7 +115,7 @@ class PersonalTest(unittest.TestCase):
         headers = {'Origin': origin, 'X-Bridge-Token': session}
         self.assertEqual(self.api('chats', **headers)[0], 200)
         self.assertEqual(self.api('conversation', {'chat_id': 'c0'}, **headers)[0], 200)
-        self.assertEqual(self.api('send', **headers)[0], 404)
+        self.assertEqual(self.api('send', **headers)[0], 400)
         self.api('disconnect')
         self.assertEqual(self.api('chats', **headers)[0], 403)
 
@@ -147,8 +147,9 @@ class PersonalTest(unittest.TestCase):
         self.assertEqual(self.calls, [])
 
     def test_no_write_routes_and_cross_origin(self):
-        for path in ['send', 'read', 'draft', 'unknown']:
+        for path in ['read', 'draft', 'unknown']:
             self.assertEqual(self.api(path)[0], 404)
+        self.assertEqual(self.api('send')[0], 400)
         self.assertEqual(self.api('chats', Origin='https://evil.example')[0], 403)
         self.assertEqual(self.api('cloud/enroll', {'email': 'a', 'password': 'b'}, Origin='https://line-per-line.netlify.app')[0], 403)
         self.assertEqual(self.api('cloud/status')[0], 503)
