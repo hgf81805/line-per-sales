@@ -83,7 +83,7 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
         def do_GET(self):
             if self.headers.get('Host') != host:
                 return self.respond(403, {'error': '接続元を確認できません。127.0.0.1のURLを開いてください。'})
-            assets = {'/cloud.js': ('text/javascript; charset=utf-8', 'cloud.js'), '/cloud-config.json': ('application/json; charset=utf-8', 'cloud-config.json'), '/send.js': ('text/javascript; charset=utf-8', 'send.js'), '/attio.js': ('text/javascript; charset=utf-8', 'attio.js')}
+            assets = {'/cloud.js': ('text/javascript; charset=utf-8', 'cloud.js'), '/cloud-config.json': ('application/json; charset=utf-8', 'cloud-config.json'), '/send.js': ('text/javascript; charset=utf-8', 'send.js'), '/attio.js': ('text/javascript; charset=utf-8', 'attio.js'), '/pipeline.js': ('text/javascript; charset=utf-8', 'pipeline.js')}
             assets.update({
                 '/favicon.ico': ('image/x-icon', 'favicon.ico'),
                 '/favicon.svg': ('image/svg+xml', 'favicon.svg'),
@@ -100,9 +100,10 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
                 self.send_header('X-Content-Type-Options', 'nosniff')
                 self.end_headers()
                 return self.wfile.write(body)
-            if self.path not in ('/', '/index.html'):
+            if asset_path not in ('/', '/index.html', '/pipeline.html'):
                 return self.respond(404, {'error': 'Not found'})
-            page = (Path(__file__).parent / 'public/index.html').read_text()
+            filename = 'pipeline.html' if asset_path == '/pipeline.html' else 'index.html'
+            page = (Path(__file__).parent / 'public' / filename).read_text()
             page = page.replace('data-local="0"', 'data-local="1"').replace('LOCAL_CSRF_PLACEHOLDER', csrf)
             self.respond(200, page, html=True)
 

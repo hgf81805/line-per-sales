@@ -33,6 +33,7 @@ function resetRemote(){
   if(!local){$('connected').classList.add('hidden');$('setup').classList.remove('hidden');}
   $('cloudLoggedIn').classList.add('hidden');$('cloudLogin').classList.remove('hidden');
   if(deviceTimer){clearInterval(deviceTimer);deviceTimer=null;}controls();
+  window.dispatchEvent(new Event('connectionchange'));
 }
 async function loadDevices(){
   if(!session)return;
@@ -103,6 +104,7 @@ $('cloudUse').onclick=()=>{
   generation++;activeDevice=id;cloudActive=true;bridgeToken=null;showConnected();controls();
   document.querySelector('#connected .badge').textContent='クラウド経由 · 確認して送信';
   $('status').textContent='「LINE一覧を取得」を押してください。';
+  window.dispatchEvent(new Event('connectionchange'));
 };
 $('cloudRefresh').onclick=()=>loadDevices().catch(e=>notice(e.message));
 $('cloudLogout').onclick=async()=>{if(busy)return;try{await raw('/auth/v1/logout?scope=local');}catch(e){}finally{forgetSession();resetRemote();notice('ログアウトしました。');}};
