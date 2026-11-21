@@ -5,10 +5,20 @@ const localRequest = request;
 let config, session = null, devices = [], activeDevice = null, cloudActive = false;
 let refreshPromise = null, deviceTimer = null, generation = 0;
 const panel = document.getElementById('cloudPanel');
-const notice = text => { $('cloudNotice').textContent = text; };
+const notice = text => { const target=$('cloudNotice')||$('status'); if(target)target.textContent=text; };
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const storageKey = 'line-remote-auth-v1';
-function forgetSession(){session=null;try{sessionStorage.removeItem(storageKey);}catch(e){}}
+const deviceKey='line-selected-device';
+function rememberedDevice(){
+  try{return sessionStorage.getItem(deviceKey);}catch{return null;}
+}
+function rememberDevice(id){
+  try{
+    if(id)sessionStorage.setItem(deviceKey,id);
+    else sessionStorage.removeItem(deviceKey);
+  }catch{}
+}
+function forgetSession(){session=null;rememberDevice(null);try{sessionStorage.removeItem(storageKey);}catch(e){}}
 function saveSession(data){
   if(!data.access_token||!data.refresh_token||!data.user?.id||data.user.is_anonymous)throw new Error('メールで登録したアカウントでログインしてください。');
   session={access_token:data.access_token,refresh_token:data.refresh_token,user:data.user,expires_at:Date.now()+(data.expires_in||3600)*1000};
@@ -29,16 +39,16 @@ async function accessToken(){
 }
 function resetRemote(){
   generation++;cloudActive=false;activeDevice=null;selected=null;messageId=null;conversationVersion=null;
-  ['chats','history','candidates'].forEach(id=>$(id).textContent='');$('name').textContent='相手を選んでください';
-  if(!local){$('connected').classList.add('hidden');$('setup').classList.remove('hidden');}
-  $('cloudLoggedIn').classList.add('hidden');$('cloudLogin').classList.remove('hidden');
+  ['chats','history','candidates','name'].forEach(id=>{if($(id))$(id).textContent=id==='name'?'相手を選んでください':'';});
+  if(!local&&$('connected')&&!bridgeToken){$('connected').classList.add('hidden');$('setup').classList.remove('hidden');}
+  if(panel){$('cloudLoggedIn').classList.add('hidden');$('cloudLogin').classList.remove('hidden');}
   if(deviceTimer){clearInterval(deviceTimer);deviceTimer=null;}controls();
   window.dispatchEvent(new Event('connectionchange'));
 }
 async function loadDevices(){
   if(!session)return;
   devices=await raw('/rest/v1/line_remote_devices?select=id,name,last_seen,enabled,capabilities&order=last_seen.desc',undefined,{method:'GET'});
-  const select=$('cloudDevice');const previous=select.value;select.replaceChildren();
+  const select=$('cloudDevice');if(!select)return;const previous=select.value||rememberedDevice();select.replaceChildren();
   for(const d of devices){const option=document.createElement('option');option.value=d.id;option.textContent=d.name+' · '+(d.enabled&&Date.now()-new Date(d.last_seen).getTime()<60000?'オンライン':'オフライン');select.appendChild(option);}
   if(devices.some(d=>d.id===previous))select.value=previous;
   $('cloudUse').disabled=busy||!devices.length;
@@ -74,9 +84,19 @@ window.savedAttioDirectory = {
   }
 };
 async function loggedIn(){
-  $('cloudLogin').classList.add('hidden');$('cloudLoggedIn').classList.remove('hidden');$('cloudEmailLabel').textContent=session.user.email;
+  if(panel){$('cloudLogin').classList.add('hidden');$('cloudLoggedIn').classList.remove('hidden');$('cloudEmailLabel').textContent=session.user.email;}
   window.dispatchEvent(new Event('attiosessionready'));
-  await loadDevices();if(deviceTimer)clearInterval(deviceTimer);
+  if(panel||rememberedDevice())await loadDevices();
+  const saved=devices.find(device=>device.id===rememberedDevice()&&device.enabled);
+  if(saved&&!panel){
+    activeDevice=saved.id;cloudActive=true;showConnected();controls();
+    const badge=document.querySelector('#connected .badge');
+    if(badge)badge.textContent='クラウド経由 · 確認して送信';
+    window.dispatchEvent(new Event('connectionchange'));
+  }
+  if(!panel)return;
+  if(saved)notice('接続するMac：'+saved.name);
+  if(deviceTimer)clearInterval(deviceTimer);
   deviceTimer=setInterval(()=>loadDevices().catch(e=>notice(e.message)),15000);
 }
 async function cloudJob(action,payload){
@@ -111,11 +131,13 @@ async function cloudJob(action,payload){
 }
 request=async function(path,body){
   if(local||!cloudActive)return localRequest(path,body);
-  if(path==='disconnect'){generation++;cloudActive=false;return {ok:true};}
+  if(path==='disconnect'){generation++;cloudActive=false;rememberDevice(null);return {ok:true};}
   busy=true;controls();$('error').textContent='';$('status').textContent='Macで処理しています…';
   try{return await cloudJob(path,body);}catch(e){$('error').textContent=e.message;throw e;}
   finally{busy=false;controls();$('status').textContent='';}
 };
+let localStatus;
+if(panel){
 $('cloudLogin').onsubmit=async event=>{
   event.preventDefault();const button=$('cloudLoginButton');button.disabled=true;notice('接続しています…');
   const email=$('cloudEmail').value.trim(),password=$('cloudPassword').value;
@@ -134,29 +156,31 @@ $('cloudSignup').onclick=async()=>{
 $('cloudUse').onclick=()=>{
   if(busy)return;
   const id=$('cloudDevice').value;
-  if(activeDevice!==id){selected=null;messageId=null;conversationVersion=null;['history','candidates','chats'].forEach(x=>$(x).textContent='');$('name').textContent='相手を選んでください';}
-  generation++;activeDevice=id;cloudActive=true;bridgeToken=null;showConnected();controls();
-  document.querySelector('#connected .badge').textContent='クラウド経由 · 確認して送信';
-  $('status').textContent='「LINE一覧を取得」を押してください。';
-  window.dispatchEvent(new Event('connectionchange'));
+  const device=devices.find(row=>row.id===id&&row.enabled);
+  if(!device){notice('接続するMacを選択してください。');return;}
+  rememberDevice(device.id);
+  try{sessionStorage.removeItem('line-bridge-session');}catch{}
+  notice('接続するMacを保存しました：'+device.name);
 };
 $('cloudRefresh').onclick=()=>loadDevices().catch(e=>notice(e.message));
 $('cloudLogout').onclick=async()=>{if(busy)return;try{await raw('/auth/v1/logout?scope=local');}catch(e){}finally{forgetSession();resetRemote();notice('ログアウトしました。');}};
-async function localStatus(){
+localStatus=async function(){
   const response=await fetch('/api/cloud/status',{method:'POST',cache:'no-store',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},body:'{}'});
   const state=await response.json();if(!response.ok)throw new Error(state.error||'Macの接続状態を取得できません。');
   $('cloudLogin').classList.toggle('hidden',state.enabled);$('cloudLocalState').classList.toggle('hidden',!state.enabled);
   notice(state.enabled?(state.connected?'リモート接続中: '+state.email+'。スマホ・別PCで同じアカウントにログインしてください。':state.error||'クラウドに接続しています…'):state.error||'同じアカウントへのリモート接続を有効にすると、このMacのLINEをスマホから読み取れます。');
-}
+};
 $('cloudDisable').onclick=async()=>{if(!confirm('このMacへのリモート接続を解除しますか？'))return;try{await localRequest('cloud/disconnect',{});await localStatus();}catch(e){notice(e.message);}};
+}
 async function initialize(){
   try{
     const response=await fetch('/cloud-config.json',{cache:'no-store'});config=await response.json();
     if(!/^https:\/\/[a-z0-9]+\.supabase\.co$/.test(config.url)||!config.key.startsWith('sb_publishable_'))throw new Error('クラウド設定を確認してください。');
-    panel.classList.remove('hidden');
-    if(local){$('cloudTitle').textContent='スマホ・別PCから使うための設定';$('cloudLoginButton').textContent='ログインしてこのMacを登録';$('cloudSignup').classList.add('hidden');await localStatus();deviceTimer=setInterval(()=>localStatus().catch(e=>notice(e.message)),15000);}
-    else{try{session=JSON.parse(sessionStorage.getItem(storageKey));}catch(e){}if(session){await accessToken();await loggedIn();}}
+    panel?.classList.remove('hidden');
+    if(local&&panel){$('cloudTitle').textContent='スマホ・別PCから使うための設定';$('cloudLoginButton').textContent='ログインしてこのMacを登録';$('cloudSignup').classList.add('hidden');await localStatus();deviceTimer=setInterval(()=>localStatus().catch(e=>notice(e.message)),15000);}
+    else if(!local){try{session=JSON.parse(sessionStorage.getItem(storageKey));}catch(e){}if(session){await accessToken();await loggedIn();}}
   }catch(e){notice(e.message);}
 }
+window.addEventListener('pageshow',event=>{if(event.persisted)location.reload();});
 initialize();
 })();

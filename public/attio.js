@@ -10,7 +10,7 @@ function manageControls(){
   $('attioSales').classList.toggle('hidden',!connected);
   $('attioSelectedLine').textContent=selected?'選択中のLINE：'+selected.title:'LINEの相手を選択してください。';
   if(lineId!==selected?.id){lineId=selected?.id;linked=null;$('attioDealInfo').textContent='案件一覧を更新して紐付けを確認してください。';$('attioTasks').replaceChildren();$('attioOpen').classList.add('hidden');}
-  for(const id of ['attioRefresh','attioConnect','attioDisconnect'])$(id).disabled=busy;
+  for(const id of ['attioRefresh'])$(id).disabled=busy;
   $('attioLink').disabled=busy||!selected||!$('attioDeal').value;
   $('attioUnlink').disabled=busy||!selected||!linked?.deal;
   $('attioCreate').disabled=busy||!snapshot||!$('attioNewName').value.trim();
@@ -82,52 +82,8 @@ handler('attioTaskCreate',async()=>{
   await write('task',{deal_id:deal.id,owner_id,content,deadline});$('attioTaskText').value='';await refresh();note('次アクションを登録しました。');
 });
 async function completeTask(task){if(busy||!confirm('「'+task.content+'」を完了にしますか？'))return;try{await write('complete',{deal_id:linked.deal.id,task_id:task.id});await refresh();note('次アクションを完了にしました。');}catch(e){note(e.message);}finally{manageControls();}}
-function setupFeedback(message, state='info') {
-  const status=$('attioSetupStatus');
-  status.textContent=message;
-  status.dataset.state=state;
-}
-function setupConnection(state, saved=false) {
-  if (!state.connected) {
-    setupFeedback(state.error||'Attioは未接続です。',state.error?'error':'info');
-    return;
-  }
-  const message=(saved?'新しいトークンを確認して保存しました。 ':'接続済み：')+
-    (state.workspace_name||state.workspace_slug||'Attio')+'。 ';
-  if(state.notes_write===false){
-    setupFeedback(message+'ノート編集には Notes を「Read & write」にしたトークンが必要です。','warning');
-  } else {
-    setupFeedback(message+(state.notes_write?'ノートの読み書き権限あり。':'ノート権限は確認できませんでした。'),state.notes_write?'success':'warning');
-  }
-}
-$('attioConnect').onclick=async()=>{
-  if(!local||busy)return;
-  const input=$('attioToken'),token=input.value.trim();
-  if(!token){
-    setupFeedback('AttioのAPIトークンを入力してください。','error');
-    input.focus();
-    return;
-  }
-  setupFeedback('Attioの接続と権限を確認しています…');
-  try{
-    const result=await request('attio/configure',{token});
-    input.value='';
-    setupConnection(result,true);
-  }catch(error){
-    const message=error instanceof TypeError||error instanceof SyntaxError
-      ? 'Macの接続アプリに到達できません。アプリを起動して画面を開き直してください。'
-      : error.message;
-    setupFeedback('保存できませんでした。 '+message,'error');
-    input.focus();
-  }
-};
-handler('attioDisconnect',async()=>{if(!local||!confirm('このMacのAttio接続を解除しますか？'))return;await request('attio/disconnect',{});snapshot=null;linked=null;setupFeedback('接続を解除しました。');$('attioDeal').replaceChildren();$('attioTasks').replaceChildren();});
 $('attioDeal').onchange=()=>{const deal=selectedDeal();if(deal)$('attioDealInfo').textContent=deal.name+' · '+deal.stage+(linked?.deal?.id===deal.id?'（このLINEに紐付け済み）':'（未選択の紐付け先）');manageControls();};
 for(const id of ['attioNewName','attioTaskText'])$(id).addEventListener('input',manageControls);
-if(local){
-  $('attioSetup').classList.remove('hidden');
-  request('attio/status',{}).then(state=>setupConnection(state)).catch(()=>setupFeedback('Attioの接続状態を取得できませんでした。','error'));
-}
 controls();
 })();
 

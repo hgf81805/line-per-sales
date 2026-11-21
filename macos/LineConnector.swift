@@ -45,7 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let statusLabel = NSTextField(wrappingLabelWithString: "初回だけBeeperトークンを入力してください。")
     let startButton = NSButton(title: "保存して接続アプリを起動", target: nil, action: nil)
     let stopButton = NSButton(title: "接続を停止", target: nil, action: nil)
-    let openButton = NSButton(title: "LINEの接続画面を開く", target: nil, action: nil)
+    let openButton = NSButton(title: "設定を開く", target: nil, action: nil)
     let forgetButton = NSButton(title: "保存したトークンを削除", target: nil, action: nil)
     let store = CredentialStore(service: "jp.line-per-sales.beeper")
     var server: Process?
@@ -73,7 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.mainMenu = menu
 
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 570, height: 485), styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
-        window.title = "つながる営業 — LINE・Attio接続（v2.0）"
+        window.title = "つながる営業 — LINE・Attio接続（v2.0.1）"
         window.center()
         let title = NSTextField(labelWithString: "LINEを、このMacにつなぐ")
         title.font = .systemFont(ofSize: 24, weight: .semibold)
@@ -260,7 +260,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusLabel.stringValue = "接続を停止しました。保存したトークンは次回も使えます。"
         updateControls()
     }
-    @objc func openLocal() { NSWorkspace.shared.open(baseURL) }
+    @objc func openLocal() { NSWorkspace.shared.open(baseURL.appendingPathComponent("settings.html")) }
     @objc func openPublic() { NSWorkspace.shared.open(URL(string: "https://line-per-line.netlify.app/")!) }
     @objc func forgetToken() {
         if qaMode { return }

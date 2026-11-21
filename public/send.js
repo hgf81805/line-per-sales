@@ -8,8 +8,6 @@ function sendControls(){
   if(selected&&$('history').children.length&&!conversationVersion&&!locked)$('sendNotice').textContent='送信するにはMacアプリを最新版に更新し、会話を読み込み直してください。';
   $('replyText').disabled=busy||locked||!conversationVersion;
   $('prepareSend').disabled=busy||locked||!conversationVersion||!$('replyText').value.trim();
-  for(const id of ['cloudDevice','cloudLogout','cloudRefresh'])$(id).disabled=busy;
-  $('cloudUse').disabled=busy||!$('cloudDevice').options.length;
   $('finalSend').disabled=busy||!ticket;$('cancelSend').disabled=busy;
 }
 controls=function(){originalControls();sendControls();};

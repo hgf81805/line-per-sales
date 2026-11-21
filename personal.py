@@ -93,7 +93,7 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
             if self.headers.get('Host') != host:
                 return self.respond(403, {'error': '接続元を確認できません。127.0.0.1のURLを開いてください。'})
             assets = {'/cloud.js': ('text/javascript; charset=utf-8', 'cloud.js'), '/cloud-config.json': ('application/json; charset=utf-8', 'cloud-config.json'), '/send.js': ('text/javascript; charset=utf-8', 'send.js'), '/attio.js': ('text/javascript; charset=utf-8', 'attio.js'), '/pipeline.js': ('text/javascript; charset=utf-8', 'pipeline.js')}
-            for script in ('marked.umd.js','note-editor.js','sales-assist.js'):
+            for script in ('marked.umd.js','note-editor.js','sales-assist.js','settings.js'):
                 assets['/'+script] = ('text/javascript; charset=utf-8', script)
             assets['/ui.css'] = ('text/css; charset=utf-8', 'ui.css')
             assets['/directory.js'] = ('text/javascript; charset=utf-8', 'directory.js')
@@ -113,9 +113,9 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
                 self.send_header('X-Content-Type-Options', 'nosniff')
                 self.end_headers()
                 return self.wfile.write(body)
-            if asset_path not in ('/', '/index.html', '/pipeline.html'):
+            if asset_path not in ('/', '/index.html', '/pipeline.html', '/settings.html'):
                 return self.respond(404, {'error': 'Not found'})
-            filename = 'pipeline.html' if asset_path == '/pipeline.html' else 'index.html'
+            filename = 'index.html' if asset_path == '/' else asset_path[1:]
             page = (Path(__file__).parent / 'public' / filename).read_text()
             page = page.replace('data-local="0"', 'data-local="1"').replace('LOCAL_CSRF_PLACEHOLDER', csrf)
             self.respond(200, page, html=True)
