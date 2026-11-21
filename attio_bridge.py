@@ -98,11 +98,19 @@ class AttioBridge:
         except (URLError,TimeoutError,OSError,ValueError):
             raise AttioError('Attioからの応答を確認できません。変更結果はAttio側でも確認してください。') from None
 
+    @staticmethod
+    def profile_from(info):
+        scope = info.get('scope')
+        return {
+            **{key: info.get(key) for key in ('workspace_id','workspace_name','workspace_slug')},
+            'notes_write': 'note:read-write' in scope.split() if isinstance(scope, str) else None,
+        }
+
     def identity(self):
         if self.profile is None:
             info=self.http('/v2/self')
             if not info.get('active') or not info.get('workspace_id'):raise AttioError('有効なAttioワークスペースのトークンを登録してください。')
-            self.profile={key:info.get(key) for key in ('workspace_id','workspace_name','workspace_slug')}
+            self.profile=self.profile_from(info)
         return dict(self.profile)
 
     def connect(self,token):
@@ -110,9 +118,14 @@ class AttioBridge:
         token=token.strip()
         info=self.http('/v2/self',token=token)
         if not info.get('active') or not info.get('workspace_id'):raise AttioError('Attioトークンを確認してください。')
-        self.http('/v2/objects/deals/attributes/stage/statuses',token=token)
+        try:
+            self.http('/v2/objects/deals/attributes/stage/statuses',token=token)
+        except AttioError as error:
+            if '権限が不足' in str(error):
+                raise AttioError('Object Configuration を Read に設定してください。') from None
+            raise
         save_token(token,service=SERVICE)
-        self.token=token;self.profile={key:info.get(key) for key in ('workspace_id','workspace_name','workspace_slug')}
+        self.token=token;self.profile=self.profile_from(info)
         return {'connected':True,**self.profile}
 
     def disconnect(self):
@@ -165,8 +178,8 @@ class AttioBridge:
     def status(self):
         try:
             return {'connected':True,**self.identity()}
-        except AttioError:
-            return {'connected':False}
+        except AttioError as error:
+            return {'connected':False,'error':str(error)}
 
     def unlink(self,account,chat):
         workspace=self.identity()['workspace_id']

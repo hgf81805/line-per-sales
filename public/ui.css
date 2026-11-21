@@ -51,3 +51,11 @@ button.primary { background: var(--accent); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+
+#attioSetupStatus[data-state]:not(:empty) {
+  padding: 10px 12px;
+  border-radius: 8px;
+}
+#attioSetupStatus[data-state="error"] { color: #882525; background: #fff1f1; }
+#attioSetupStatus[data-state="warning"] { color: #714707; background: #fff5db; }
+#attioSetupStatus[data-state="success"] { color: #165440; background: #e6f5ee; }
