@@ -72,7 +72,7 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
         def do_OPTIONS(self):
             if (self.headers.get('Host') != host
                     or self.headers.get('Origin') != public_origin
-                    or self.path not in ('/api/pair', '/api/chats', '/api/conversation', '/api/suggest', '/api/prepare-send', '/api/send', '/api/send-status', '/api/disconnect', '/api/attio-list', '/api/attio-linked', '/api/attio-link', '/api/attio-unlink', '/api/attio-create', '/api/attio-stage', '/api/attio-task', '/api/attio-complete')
+                    or self.path not in ('/api/pair', '/api/chats', '/api/conversation', '/api/suggest', '/api/prepare-send', '/api/send', '/api/send-status', '/api/disconnect', '/api/attio-list', '/api/attio-linked', '/api/attio-link', '/api/attio-unlink', '/api/attio-create', '/api/attio-stage', '/api/attio-task', '/api/attio-complete', '/api/attio-contact')
                     or self.headers.get('Access-Control-Request-Method') != 'POST'):
                 return self.respond(403, {'error': '許可されていない接続元です。'})
             requested = {h.strip().lower() for h in self.headers.get('Access-Control-Request-Headers', '').split(',') if h.strip()}
@@ -127,7 +127,7 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
                 paired = is_public and bridge_token in sessions
             if self.headers.get('Host') != host or not (is_local or paired or (is_public and self.path == '/api/pair')):
                 return self.respond(403, {'error': 'このMacの画面で接続コードを発行し、公開サイトから接続し直してください。'})
-            routes = ('/api/attio/configure', '/api/attio/disconnect', '/api/attio/status', '/api/attio-list', '/api/attio-linked', '/api/attio-link', '/api/attio-unlink', '/api/attio-create', '/api/attio-stage', '/api/attio-task', '/api/attio-complete', '/api/prepare-send', '/api/send', '/api/send-status', '/api/chats', '/api/conversation', '/api/suggest', '/api/pair', '/api/pair-code', '/api/disconnect', '/api/cloud/status', '/api/cloud/enroll', '/api/cloud/disconnect')
+            routes = ('/api/attio/configure', '/api/attio/disconnect', '/api/attio/status', '/api/attio-list', '/api/attio-linked', '/api/attio-link', '/api/attio-unlink', '/api/attio-create', '/api/attio-stage', '/api/attio-task', '/api/attio-complete', '/api/attio-contact', '/api/prepare-send', '/api/send', '/api/send-status', '/api/chats', '/api/conversation', '/api/suggest', '/api/pair', '/api/pair-code', '/api/disconnect', '/api/cloud/status', '/api/cloud/enroll', '/api/cloud/disconnect')
             if self.path not in routes:
                 return self.respond(404, {'error': 'この操作には対応していません。'})
             if (self.path == '/api/pair-code' or self.path.startswith('/api/cloud/') or self.path.startswith('/api/attio/')) and not is_local:
@@ -219,6 +219,13 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
                 with lock:
                     if not isinstance(cid, str) or cid not in allowed:
                         return self.respond(400, {'error': '一覧からLINEの1対1トークを選んでください。'})
+                if self.path == '/api/attio-contact':
+                    chat = sender.chat(token,cid)
+                    result = attio.contact(chat['account_id'],cid,chat['title'],data)
+                    if 'profile' in result:
+                        snapshot = {'profile':result.pop('profile'),'records':[result['linked']]}
+                        result['storage'] = cloud.store_attio(snapshot,'people') if cloud else None
+                    return self.respond(200,result)
                 if self.path in ('/api/attio-linked','/api/attio-link','/api/attio-unlink'):
                     account = sender.chat(token,cid)['account_id']
                     if self.path == '/api/attio-linked':

@@ -88,3 +88,113 @@ for(const id of ['attioNewName','attioTaskText'])$(id).addEventListener('input',
 if(local){$('attioSetup').classList.remove('hidden');request('attio/status',{}).then(state=>{$('attioSetupStatus').textContent=state.connected?'接続先：'+state.workspace_name:'Attioは未接続です。';}).catch(e=>{$('attioSetupStatus').textContent=e.message;});}
 controls();
 })();
+
+// Suggest a contact for the selected LINE conversation and require confirmation before saving.
+(() => {
+  const previousControls = controls;
+  let chat = null, result = null, pending = false, queued = false;
+  function showPanel(open) {
+    $('contactPanel').classList.toggle('hidden', !open);
+    $('contactToggle').setAttribute('aria-expanded', String(open));
+  }
+  function render() {
+    const matches = $('contactMatches');
+    matches.replaceChildren();
+    $('contactOptions').classList.toggle('hidden', Boolean(result?.linked));
+    $('contactToggle').textContent = result?.linked ? 'Attioの連絡先を確認' :
+      'Attioに登録・紐付け' + (result?.candidates?.length ? '（候補あり）' : '');
+    if (!result) return;
+    if (result.linked) {
+      const status = $('contactStatus');
+      status.textContent = '紐付け済み：' + result.linked.name;
+      try {
+        const url = new URL(result.linked.url);
+        if (url.origin === 'https://app.attio.com') {
+          const link = document.createElement('a');
+          link.href = url.href;
+          link.target = '_blank';
+          link.rel = 'noopener noreferrer';
+          link.textContent = 'Attioで開く ↗';
+          status.append(' ', link);
+        }
+      } catch {}
+      if (result.storage && !result.storage.saved) status.append(' ', result.storage.message);
+      return;
+    }
+    $('contactStatus').textContent = result.candidates.length
+      ? '候補が見つかりました。名前やメールを確認して選んでください。' + (result.has_more ? ' 候補が多い場合は名前を絞って検索してください。' : '')
+      : '一致する名前はありません。名前を変えて検索するか、新規登録できます。';
+    for (const person of result.candidates) {
+      const row = document.createElement('p');
+      row.textContent = [person.name, person.detail, person.job_title].filter(Boolean).join(' · ') + ' ';
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = 'この連絡先に紐付け';
+      button.onclick = () => {
+        if (!pending && !busy && confirm('LINE「' + chat.title + '」をAttio「' + [person.name, person.detail].filter(Boolean).join(' · ') + '」に紐付けますか？')) {
+          run({mode:'link', person_id:person.id, confirmed:true});
+        }
+      };
+      row.append(button);
+      matches.append(row);
+    }
+  }
+  async function run(payload) {
+    if (!chat || pending || busy) return;
+    const target = chat;
+    pending = true;
+    $('contactStatus').textContent = 'Attioに接続しています…';
+    controls();
+    try {
+      const data = await request('attio-contact', {chat_id:target.id, ...payload});
+      if (chat === target) {
+        result = data;
+        render();
+      }
+    } catch (error) {
+      if (chat === target) $('contactStatus').textContent = error.message;
+    } finally {
+      pending = false;
+      controls();
+    }
+  }
+  controls = function () {
+    previousControls();
+    if (chat !== selected) {
+      chat = selected;
+      result = null;
+      queued = Boolean(chat);
+      showPanel(false);
+      $('contactStatus').textContent = '';
+      $('contactSearch').value = chat?.title || '';
+      $('contactName').value = chat?.title || '';
+      render();
+    }
+    $('contactActions').classList.toggle('hidden', !chat);
+    for (const id of ['contactFind', 'contactCreate']) $(id).disabled = busy || pending;
+    if (queued && !busy && !pending) {
+      queued = false;
+      const target = chat;
+      setTimeout(() => {
+        if (chat === target) run({mode:'lookup'});
+      }, 0);
+    }
+  };
+  $('contactToggle').onclick = () => {
+    const open = $('contactPanel').classList.contains('hidden');
+    showPanel(open);
+    if (open && !result && !pending) run({mode:'lookup'});
+  };
+  $('contactFind').onclick = () => run({mode:'lookup', query:$('contactSearch').value.trim()});
+  $('contactCreate').onclick = () => {
+    const name = $('contactName').value.trim();
+    if (!name) {
+      $('contactStatus').textContent = '登録する名前を入力してください。';
+      return;
+    }
+    if (confirm('Attioに「' + name + '」を新規登録し、LINE「' + chat.title + '」に紐付けますか？')) {
+      run({mode:'create', name, confirmed:true});
+    }
+  };
+  controls();
+})();

@@ -125,4 +125,23 @@ class AttioTest(unittest.TestCase):
             self.assertNotIn('fictional-api-secret',str(result))
         self.assertEqual(self.writes,[])
 
+    def test_line_contact_requires_confirmation_and_creates_only_once(self):
+        record = {'id': {'record_id': DEAL}, 'values': {'name': [{'full_name': 'Example person'}]}}
+        self.bridge.http = Mock(side_effect=lambda path, *args: {
+            'data': [record] if path.endswith('/query') else record
+        })
+        self.assertEqual(self.bridge.contact('line', 'chat', 'Example', {})['candidates'][0]['id'], DEAL)
+        with self.assertRaises(AttioError):
+            self.bridge.contact('line', 'chat', 'Example', {'mode': 'create'})
+        payload = {'mode': 'create', 'confirmed': True, 'name': 'Example person'}
+        for _ in range(2):
+            self.assertEqual(self.bridge.contact('line', 'chat', 'Example', payload)['linked']['id'], DEAL)
+        creates = [call for call in self.bridge.http.call_args_list if call.args[0] == '/v2/objects/people/records']
+        self.assertEqual(len(creates), 1)
+        self.assertEqual(creates[0].args[1], {'data': {'values': {'name': 'Example person'}}})
+        linked = self.bridge.contact('line', 'another-chat', 'Example', {
+            'mode': 'link', 'confirmed': True, 'person_id': DEAL
+        })
+        self.assertEqual(linked['linked']['id'], DEAL)
+
 if __name__=='__main__':unittest.main()

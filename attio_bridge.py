@@ -11,7 +11,7 @@ import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, build_opener, HTTPRedirectHandler
-from uuid import UUID
+from uuid import UUID, uuid5, NAMESPACE_URL
 
 from token_store import load_token, save_token, delete_token
 
@@ -76,6 +76,7 @@ class AttioBridge:
         os.chmod(self.path,0o600)
         db.execute('create table if not exists links (workspace text, account text, chat text, deal text not null, primary key(workspace,account,chat))')
         db.execute('create table if not exists operations (workspace text, operation text, fingerprint text, status text, result_id text, primary key(workspace,operation))')
+        db.execute('create table if not exists contact_links (workspace text, account text, chat text, person text not null, primary key(workspace,account,chat))')
         return db
 
     def http(self,path,body=None,method='GET',token=None):
@@ -173,6 +174,46 @@ class AttioBridge:
             with closing(self.db()) as db:db.execute('delete from links where workspace=? and account=? and chat=?',(workspace,account,chat))
         return {'deal':None,'tasks':[]}
 
+    def contact(self, account, chat, title, payload):
+        workspace = self.identity()
+        key = (workspace['workspace_id'], account, chat)
+        mode = payload.get('mode', 'lookup')
+        with self.lock, closing(self.db()) as db:
+            linked = db.execute(
+                'select person from contact_links where workspace=? and account=? and chat=?', key
+            ).fetchone()
+            if linked:
+                return {'linked': self.person(linked[0]), 'profile': workspace}
+            if mode == 'lookup':
+                query = payload.get('query', title)
+                if not isinstance(query, str) or not query.strip() or len(query) > 200:
+                    raise AttioError('検索する名前を1〜200文字で入力してください。')
+                result = self.http('/v2/objects/people/records/query', {
+                    'filter': {'name': {'full_name': {'$contains': query.strip()}}}, 'limit': 20
+                }, 'POST')
+                return {'candidates': [slim_directory(row, 'people') for row in result['data']],
+                        'name': title, 'has_more': len(result['data']) == 20}
+
+            if mode not in ('create', 'link') or payload.get('confirmed') is not True:
+                raise AttioError('登録または紐付けの内容を確認してください。')
+            if mode == 'create':
+                operation = str(uuid5(NAMESPACE_URL, json.dumps(['line-attio-person', *key])))
+                result = self.mutate('person', {
+                    'confirmed': True, 'operation_id': operation, 'name': payload.get('name')
+                })
+                person_id = uuid(result['id'])
+                # Save the association before the follow-up read so a retry cannot create another contact.
+                db.execute('insert into contact_links values(?,?,?,?)', (*key, person_id))
+                person = self.person(person_id)
+            else:
+                person = self.person(payload.get('person_id'))
+                db.execute('insert into contact_links values(?,?,?,?)', (*key, person['id']))
+            return {'linked': person, 'profile': workspace}
+
+    def person(self, person_id):
+        record = self.http('/v2/objects/people/records/' + uuid(person_id))['data']
+        return slim_directory(record, 'people')
+
     def mutate(self,kind,data):
         if data.get('confirmed') is not True:raise AttioError('変更内容を確認してから保存してください。')
         operation=uuid(data.get('operation_id'))
@@ -197,6 +238,13 @@ class AttioBridge:
                 raise AttioError('登録結果が不明です。二重登録を避けるため自動再実行しません。Attio側で確認してください。') from None
 
     def validate_mutation(self,kind,data):
+        if kind == 'person':
+            name = data.get('name')
+            if not isinstance(name, str) or not name.strip() or len(name) > 200:
+                raise AttioError('連絡先の名前を1〜200文字で入力してください。')
+            return '/v2/objects/people/records', {
+                'values': {'name': name.strip()}
+            }, 'POST', 'record_id'
         if kind in ('create','stage'):
             stage=uuid(data.get('stage_id'))
             if stage not in {s['id'] for s in self.stages()}:raise AttioError('営業工程を選び直してください。')
