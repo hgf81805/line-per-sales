@@ -11,11 +11,30 @@ controls=function(){baseControls();for(const id of ['directoryRefresh','director
 const node=(tag,text)=>{const el=document.createElement(tag);if(text!==undefined)el.textContent=text;return el;};
 function render(){
   const search=$('directorySearch').value.trim().toLocaleLowerCase();
-  const filtered=records.filter(r=>[r.name,r.detail,r.job_title].filter(Boolean).join(' ').toLocaleLowerCase().includes(search));
+  const filtered=records.filter(r=>[r.name,r.detail,r.job_title,...(r.emails||[]),...(r.phones||[])].filter(Boolean).join(' ').toLocaleLowerCase().includes(search));
   $('directoryCards').replaceChildren();
   for(const record of filtered){
     const card=node('article');card.className='deal-card';card.append(node('h3',record.name));
-    if(record.detail)card.append(node('p',record.detail));if(record.job_title)card.append(node('p',record.job_title));
+    if($('directorySource').value==='people'){
+      const details=node('details');
+      details.append(node('summary','連絡先の詳細'));
+      const info=node('dl');
+      const date=record.created_at?new Date(record.created_at):null;
+      const fields=[
+        ['メール',record.emails?.join(' / ') || record.detail],
+        ['電話番号',record.phones?.join(' / ')],
+        ['役職',record.job_title],
+        ['紹介・説明',record.description],
+        ['Attio登録日時',date&&!Number.isNaN(date.getTime())?date.toLocaleString('ja-JP'):null]
+      ];
+      for(const [label,value] of fields){
+        if(value)info.append(node('dt',label),node('dd',value));
+      }
+      if(!info.children.length)details.append(node('p','表示できる詳細はありません。'));
+      else details.append(info);
+      details.style.whiteSpace='pre-wrap';
+      card.append(details);
+    }else if(record.detail)card.append(node('p',record.detail));
     if(record.fetched_at){
       const timestamp=new Date(record.fetched_at);
       if(!Number.isNaN(timestamp.getTime()))card.append(node('p','Attioからの最終取得 '+timestamp.toLocaleString('ja-JP')));

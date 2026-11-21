@@ -51,9 +51,17 @@ def slim_directory(record,source):
     else:
         name=first('name').get('value')
         detail=first('domains').get('domain') or ''
-    return {'id':record['id']['record_id'],'name':name or detail or '名称未設定',
+    result={'id':record['id']['record_id'],'name':name or detail or '名称未設定',
             'detail':detail,'job_title':first('job_title').get('value') if source=='people' else None,
             'url':record.get('web_url')}
+    if source=='people':
+        result.update({
+            'emails': [entry['email_address'] for entry in values.get('email_addresses', []) if entry.get('email_address')],
+            'phones': [entry.get('original_phone_number') or entry['phone_number'] for entry in values.get('phone_numbers', []) if entry.get('original_phone_number') or entry.get('phone_number')],
+            'description': first('description').get('value'),
+            'created_at': record.get('created_at') or first('created_at').get('value'),
+        })
+    return result
 
 class AttioBridge:
     def __init__(self, path=None):

@@ -111,6 +111,8 @@ class CloudRelay:
             workspace=str(uuid.UUID(result['profile']['workspace_id']))
             records=result.get('deals',[]) if source=='deals' else result['records']
             fields={'name','url','stage_id','stage','stage_since','owner_id','value','currency'} if source=='deals' else {'name','detail','job_title','url'}
+            if source=='people':
+                fields.update({'emails','phones','description','created_at'})
             self.access_token()
             with self.lock:
                 owner=self.credentials['user_id']

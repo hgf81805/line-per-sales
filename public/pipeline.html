@@ -21,4 +21,4 @@ function controls(){ $('boardRefresh').disabled=busy||(!local&&$('connected').cl
 function showConnected(){ $('connected').classList.remove('hidden');$('setup').classList.add('hidden'); }
 async function request(path,body){if(!local)throw new Error('先にログインしてMacを選択してください。');busy=true;controls();try{const response=await fetch('/api/'+path,{method:'POST',cache:'no-store',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},body:JSON.stringify(body)});const data=await response.json();if(!response.ok)throw new Error(data.error||'接続に失敗しました。');return data;}finally{busy=false;controls();}}
 if(local){showConnected();controls();}
-</script><script src="/cloud.js?v=attio-saved"></script><script src="/pipeline.js"></script><script src="/directory.js?v=attio-saved"></script></body></html>
+</script><script src="/cloud.js?v=attio-details"></script><script src="/pipeline.js"></script><script src="/directory.js?v=attio-details"></script></body></html>
