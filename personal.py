@@ -1,5 +1,6 @@
 """Loopback-only personal LINE UI. Text sending requires a short-lived confirmation ticket."""
 from uuid import UUID
+import sales_assist
 import json
 import secrets
 import threading
@@ -73,7 +74,7 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
         def do_OPTIONS(self):
             if (self.headers.get('Host') != host
                     or self.headers.get('Origin') != public_origin
-                    or self.path not in ('/api/pair', '/api/chats', '/api/conversation', '/api/suggest', '/api/prepare-send', '/api/send', '/api/send-status', '/api/disconnect', '/api/attio-list', '/api/attio-linked', '/api/attio-link', '/api/attio-unlink', '/api/attio-create', '/api/attio-stage', '/api/attio-task', '/api/attio-complete', '/api/attio-contact', '/api/attio-note')
+                    or self.path not in ('/api/pair', '/api/chats', '/api/conversation', '/api/suggest', '/api/prepare-send', '/api/send', '/api/send-status', '/api/disconnect', '/api/attio-list', '/api/attio-linked', '/api/attio-link', '/api/attio-unlink', '/api/attio-create', '/api/attio-stage', '/api/attio-task', '/api/attio-complete', '/api/attio-contact', '/api/attio-note', '/api/sales-assist')
                     or self.headers.get('Access-Control-Request-Method') != 'POST'):
                 return self.respond(403, {'error': '許可されていない接続元です。'})
             requested = {h.strip().lower() for h in self.headers.get('Access-Control-Request-Headers', '').split(',') if h.strip()}
@@ -92,7 +93,7 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
             if self.headers.get('Host') != host:
                 return self.respond(403, {'error': '接続元を確認できません。127.0.0.1のURLを開いてください。'})
             assets = {'/cloud.js': ('text/javascript; charset=utf-8', 'cloud.js'), '/cloud-config.json': ('application/json; charset=utf-8', 'cloud-config.json'), '/send.js': ('text/javascript; charset=utf-8', 'send.js'), '/attio.js': ('text/javascript; charset=utf-8', 'attio.js'), '/pipeline.js': ('text/javascript; charset=utf-8', 'pipeline.js')}
-            for script in ('marked.umd.js','note-editor.js'):
+            for script in ('marked.umd.js','note-editor.js','sales-assist.js'):
                 assets['/'+script] = ('text/javascript; charset=utf-8', script)
             assets['/ui.css'] = ('text/css; charset=utf-8', 'ui.css')
             assets['/directory.js'] = ('text/javascript; charset=utf-8', 'directory.js')
@@ -131,7 +132,7 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
                 paired = is_public and bridge_token in sessions
             if self.headers.get('Host') != host or not (is_local or paired or (is_public and self.path == '/api/pair')):
                 return self.respond(403, {'error': 'このMacの画面で接続コードを発行し、公開サイトから接続し直してください。'})
-            routes = ('/api/attio/configure', '/api/attio/disconnect', '/api/attio/status', '/api/attio-list', '/api/attio-linked', '/api/attio-link', '/api/attio-unlink', '/api/attio-create', '/api/attio-stage', '/api/attio-task', '/api/attio-complete', '/api/attio-contact', '/api/attio-note', '/api/prepare-send', '/api/send', '/api/send-status', '/api/chats', '/api/conversation', '/api/suggest', '/api/pair', '/api/pair-code', '/api/disconnect', '/api/cloud/status', '/api/cloud/enroll', '/api/cloud/disconnect')
+            routes = ('/api/attio/configure', '/api/attio/disconnect', '/api/attio/status', '/api/attio-list', '/api/attio-linked', '/api/attio-link', '/api/attio-unlink', '/api/attio-create', '/api/attio-stage', '/api/attio-task', '/api/attio-complete', '/api/attio-contact', '/api/attio-note', '/api/sales-assist', '/api/prepare-send', '/api/send', '/api/send-status', '/api/chats', '/api/conversation', '/api/suggest', '/api/pair', '/api/pair-code', '/api/disconnect', '/api/cloud/status', '/api/cloud/enroll', '/api/cloud/disconnect')
             if self.path not in routes:
                 return self.respond(404, {'error': 'この操作には対応していません。'})
             if (self.path == '/api/pair-code' or self.path.startswith('/api/cloud/') or self.path.startswith('/api/attio/')) and not is_local:
@@ -238,6 +239,22 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
                     return self.respond(200, sender.status(data.get('ticket_id')))
                 if self.path == '/api/send':
                     return self.respond(200, sender.send(token, data.get('ticket_id')))
+                if self.path == '/api/sales-assist' and data.get('mode') == 'today':
+                    with lock:
+                        chats = list(allowed.items())
+                    results = []
+                    for chat_id, _ in chats:
+                        try:
+                            chat = sender.chat(token, chat_id)
+                            page = reader.message_page(token, chat_id)
+                            items = sorted(page.get('items') or [], key=reader.message_order)
+                            crm = sales_assist.context(attio, None, chat['account_id'], chat_id)
+                            reasons = sales_assist.follow_reasons(items, crm)
+                            if reasons:
+                                results.append({'chat_id': chat_id, 'reasons': reasons})
+                        except (RuntimeError, ValueError, OSError):
+                            results.append({'chat_id': chat_id, 'reasons': ['確認できませんでした']})
+                    return self.respond(200, {'items': results})
                 cid = data.get('chat_id')
                 with lock:
                     if not isinstance(cid, str) or cid not in allowed:
@@ -260,6 +277,15 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
                     return self.respond(200, sender.prepare(token, cid, data.get('text'), data.get('conversation_version')))
                 page = reader.message_page(token, cid)
                 items = sorted(page.get('items') or [], key=reader.message_order)
+                if self.path == '/api/sales-assist':
+                    chat = sender.chat(token, cid)
+                    crm = sales_assist.context(attio, cloud, chat['account_id'], cid)
+                    draft = data.get('draft', '')
+                    if not isinstance(draft, str) or len(draft) > 1000:
+                        return self.respond(400, {'error': '下書きは1,000文字以内にしてください。'})
+                    result = sales_assist.generate(items, crm, data.get('style'), draft)
+                    result['version'] = conversation_version(page)
+                    return self.respond(200, result)
                 target = reader.last_inbound(items)
                 # The original reply context preserves up to 20 useful text messages.
                 if target:

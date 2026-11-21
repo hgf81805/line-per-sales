@@ -53,6 +53,7 @@ async function write(kind,payload){
   operations.delete(key);return result;
 }
 function handler(id,action){$(id).onclick=async()=>{if(busy)return;try{note('');await action();}catch(e){note(e.message);}finally{manageControls();}};}
+window.refreshAttioSales=async()=>{await refresh();return linked?.deal;};
 handler('attioRefresh',refresh);
 handler('attioPrevious',async()=>{offset=Math.max(0,offset-50);await refresh();});
 handler('attioNext',async()=>{offset+=50;await refresh();});

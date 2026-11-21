@@ -59,3 +59,7 @@ button.primary { background: var(--accent); }
 #attioSetupStatus[data-state="error"] { color: #882525; background: #fff1f1; }
 #attioSetupStatus[data-state="warning"] { color: #714707; background: #fff5db; }
 #attioSetupStatus[data-state="success"] { color: #165440; background: #e6f5ee; }
+
+#assistResult button, #followResults button { margin: 4px 6px 4px 0; }
+#assistResult p { white-space: pre-wrap; overflow-wrap: anywhere; }
+#assistResult details { margin-bottom: 12px; }
