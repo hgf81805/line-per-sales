@@ -144,4 +144,24 @@ class AttioTest(unittest.TestCase):
         })
         self.assertEqual(linked['linked']['id'], DEAL)
 
+    def test_note_revision_and_parent_are_checked_before_update(self):
+        initial = {
+            'id': {'note_id': TASK}, 'parent_object': 'people',
+            'parent_record_id': DEAL, 'title': 'Before', 'content_markdown': '**Original**'
+        }
+        updated = {**initial, 'title':'After', 'content_markdown':'## Updated'}
+        self.bridge.http = Mock(side_effect=[{'data': initial}] * 4 + [{'data': updated}])
+        ids = {'note_id': TASK, 'person_id': DEAL}
+        note = self.bridge.note(ids)
+        with self.assertRaises(AttioError):
+            self.bridge.note({**ids, 'person_id': OWNER})
+        with self.assertRaises(AttioError):
+            self.bridge.note({**ids, 'title': 'After', 'body': '## Updated', 'revision': 'stale'})
+        self.assertEqual(self.bridge.http.call_count, 3)
+        saved = self.bridge.note({**ids, 'title': 'After', 'body': '## Updated', 'revision': note['revision']})
+        self.assertEqual(saved['body'], '## Updated')
+        self.assertEqual(self.bridge.http.call_args.args, (
+            '/v2/notes/'+TASK, {'data': {'title':'After','format':'markdown','content':'## Updated'}}, 'PATCH'
+        ))
+
 if __name__=='__main__':unittest.main()

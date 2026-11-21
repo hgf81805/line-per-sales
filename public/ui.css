@@ -1,0 +1,53 @@
+:root {
+  color: #182a2a;
+  background: #f3f7f6;
+  --accent: #126658;
+  --line: #dce7e4;
+}
+header { background: linear-gradient(125deg, #102d2b, #155047 75%, #166255); }
+header nav a {
+  color: #dcece8;
+  border-radius: 8px;
+  padding: 8px 12px;
+  text-decoration: none;
+}
+header nav a:hover, header nav a[aria-current] { background: #ffffff1c; color: white; }
+main { max-width: 1200px; }
+.panel, .deal-card {
+  border-color: var(--line);
+  border-radius: 16px;
+  box-shadow: 0 6px 24px #153b3209;
+}
+#directoryCards { align-items: start; }
+#directoryCards .deal-card, .board .deal-card { animation: card-in 220ms ease-out both; }
+.deal-card details[open] > :not(summary) { animation: card-in 170ms ease-out both; }
+button, .button, header nav a {
+  transition: color 160ms ease, background 160ms ease, transform 160ms ease, box-shadow 160ms ease;
+}
+button:not(:disabled):hover, .button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px #153b321c;
+}
+button:not(:disabled):active, .button:active { transform: translateY(0); }
+summary:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 3px solid #559b91;
+  outline-offset: 2px;
+}
+button.primary { background: var(--accent); }
+.cloud-privacy { margin-bottom: 12px; }
+.cloud-privacy summary { cursor: pointer; }
+.contact-note-body { white-space: normal; line-height: 1.65; }
+.contact-note-body pre { overflow-x: auto; padding: 12px; background: #edf5f3; border-radius: 8px; white-space: pre; }
+.contact-note-body table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
+.contact-note-body :is(th,td) { border: 1px solid var(--line); padding: 6px 10px; }
+.note-form { display: grid; gap: 12px; margin: 12px 0; }
+.note-form label { display: grid; gap: 6px; }
+.note-form :is(input,textarea) { width: 100%; font: inherit; padding: 10px; border: 1px solid var(--line); border-radius: 8px; }
+.note-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+@keyframes card-in {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}

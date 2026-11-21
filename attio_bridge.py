@@ -174,6 +174,39 @@ class AttioBridge:
             with closing(self.db()) as db:db.execute('delete from links where workspace=? and account=? and chat=?',(workspace,account,chat))
         return {'deal':None,'tasks':[]}
 
+    def note(self, payload):
+        note_id = uuid(payload.get('note_id'))
+        contact_id = uuid(payload.get('person_id'))
+        path = '/v2/notes/' + note_id
+        with self.lock:
+            current = self.http(path)['data']
+            if current.get('parent_record_id') != contact_id or current.get('parent_object') != 'people':
+                raise AttioError('この連絡先のノートではありません。')
+            note = self.note_fields(current)
+            if 'body' not in payload:
+                return note
+            body = payload['body']
+            title = payload.get('title')
+            if not isinstance(body, str) or not body.strip() or len(body.encode()) > 6000:
+                raise AttioError('ノート本文を入力してください。上限はUTF-8で6,000バイトです。')
+            if not isinstance(title, str) or not title.strip() or len(title) > 200:
+                raise AttioError('タイトルを1〜200文字にしてください。')
+            if payload.get('revision') != note['revision']:
+                if (title.strip(), body) == (note['title'], note['body']):
+                    return note
+                raise AttioError('Attioでノートが変更されています。編集内容を控えてから開き直してください。')
+            updated = self.http(path, {'data': {
+                'title': title.strip(), 'format': 'markdown', 'content': body
+            }}, 'PATCH')['data']
+            return self.note_fields(updated)
+
+    @staticmethod
+    def note_fields(record):
+        title = record['title']
+        body = record.get('content_markdown') or record.get('content_plaintext') or ''
+        revision = hashlib.sha256(json.dumps([title, body], ensure_ascii=False).encode()).hexdigest()
+        return {'id': record['id']['note_id'], 'title': title, 'body': body, 'revision': revision}
+
     def contact(self, account, chat, title, payload):
         workspace = self.identity()
         key = (workspace['workspace_id'], account, chat)

@@ -39,22 +39,25 @@ function render(){
       let notesLoaded=false;
       details.addEventListener('toggle',async()=>{
         if(!details.open||notesLoaded)return;
-        if(!window.savedAttioDirectory.available()){
+        if(!local&&!window.savedAttioDirectory.available()){
           notes.replaceChildren(node('p','ノートは公開ページにログインして確認できます。'));
           return;
         }
         notesLoaded=true;
         notes.replaceChildren(node('p','ノートを読み込んでいます…'));
         try{
-          const entries=await window.savedAttioDirectory.notes(record.id);
+          const entries=local ? (await request('attio-note',{person_id:record.id})).notes : await window.savedAttioDirectory.notes(record.id);
           if(!notes.isConnected)return;
           notes.replaceChildren(node('h4','Attioノート'));
           if(!entries.length)notes.append(node('p','保存済みのノートはありません。'));
           for(const entry of entries){
             const note=node('details');
-            const body=node('div',entry.body);
+            const body=node('div');
+            renderContactMarkdown(body,entry.body);
             body.className='contact-note-body';
-            note.append(node('summary',entry.title||'ノート'),body);
+            const heading=node('summary',entry.title||'ノート');
+            note.append(heading,body);
+            attachContactNoteEditor(note,record,entry,heading,body);
             notes.append(note);
           }
         }catch{

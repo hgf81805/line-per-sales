@@ -18,7 +18,7 @@ def build(destination):
     for name in ('app.py', 'attio_bridge.py', 'confirmed_send.py', 'personal.py', 'beeper_reader.py', 'token_store.py', 'cloud_relay.py'):
         shutil.copyfile(ROOT / name, connector / name)
     (connector / 'public').mkdir(exist_ok=True)
-    for name in ('index.html', 'cloud.js', 'send.js', 'attio.js', 'pipeline.html', 'pipeline.js', 'directory.js', 'cloud-config.json', 'favicon.ico', 'favicon.svg', 'favicon-32.png', 'apple-touch-icon.png'):
+    for name in ('index.html', 'cloud.js', 'send.js', 'attio.js', 'pipeline.html', 'pipeline.js', 'directory.js', 'marked.umd.js', 'marked-LICENSE.md', 'note-editor.js', 'ui.css', 'cloud-config.json', 'favicon.ico', 'favicon.svg', 'favicon-32.png', 'apple-touch-icon.png'):
         shutil.copyfile(ROOT / 'public' / name, connector / 'public' / name)
     cache = ROOT / '.build/module-cache'
     cache.mkdir(parents=True, exist_ok=True)
@@ -31,8 +31,8 @@ def build(destination):
                       'CFBundleIdentifier': 'jp.line-per-sales.connector',
                       'CFBundleName': 'つながる営業',
                       'CFBundleDisplayName': 'つながる営業',
-                      'CFBundlePackageType': 'APPL', 'CFBundleShortVersionString': '1.8.0',
-                      'CFBundleVersion': '12', 'LSMinimumSystemVersion': '13.0',
+                      'CFBundlePackageType': 'APPL', 'CFBundleShortVersionString': '1.9.0',
+                      'CFBundleVersion': '13', 'LSMinimumSystemVersion': '13.0',
                       'NSHighResolutionCapable': True,
                       'NSLocalNetworkUsageDescription': 'このMac内のBeeperと接続して、選択したLINEトークを読み取ります。'}, f)
     subprocess.run(['/usr/bin/codesign', '--force', '--sign', '-', '--identifier',

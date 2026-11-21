@@ -73,7 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.mainMenu = menu
 
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 570, height: 485), styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
-        window.title = "つながる営業 — LINE・Attio接続（v1.8）"
+        window.title = "つながる営業 — LINE・Attio接続（v1.9）"
         window.center()
         let title = NSTextField(labelWithString: "LINEを、このMacにつなぐ")
         title.font = .systemFont(ofSize: 24, weight: .semibold)

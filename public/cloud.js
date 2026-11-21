@@ -80,7 +80,7 @@ async function loggedIn(){
   deviceTimer=setInterval(()=>loadDevices().catch(e=>notice(e.message)),15000);
 }
 async function cloudJob(action,payload){
-  if(!['chats','conversation','suggest','prepare-send','send','send-status','attio-list','attio-linked','attio-link','attio-unlink','attio-create','attio-stage','attio-task','attio-complete','attio-contact'].includes(action))throw new Error('この操作には対応していません。');
+  if(!['chats','conversation','suggest','prepare-send','send','send-status','attio-list','attio-linked','attio-link','attio-unlink','attio-create','attio-stage','attio-task','attio-complete','attio-contact','attio-note'].includes(action))throw new Error('この操作には対応していません。');
   const epoch=generation;
   await loadDevices();
   const device=devices.find(d=>d.id===activeDevice);
@@ -89,6 +89,7 @@ async function cloudJob(action,payload){
   if(action.startsWith('attio-')&&!device.capabilities?.includes('attio-crm-v1'))throw new Error('Attioを使うにはMacアプリをv1.5へ更新してください。');
   if(action==='attio-list'&&payload.source&&!device.capabilities?.includes('attio-directory-v1'))throw new Error('会社・連絡先を取得するにはMacアプリをv1.6へ更新してください。');
   if(action==='attio-contact'&&!device.capabilities?.includes('attio-contact-v1'))throw new Error('LINE連絡先の登録にはMacアプリv1.8が必要です。');
+  if(action==='attio-note'&&!device.capabilities?.includes('attio-note-edit-v1'))throw new Error('ノート編集にはMacアプリv1.9が必要です。');
   const [job]=await raw('/rest/v1/line_remote_jobs',{user_id:session.user.id,device_id:activeDevice,action,payload},{headers:{Prefer:'return=representation'}});
   try{
     const deadline=Date.now()+245000;

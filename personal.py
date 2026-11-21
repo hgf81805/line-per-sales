@@ -1,4 +1,5 @@
 """Loopback-only personal LINE UI. Text sending requires a short-lived confirmation ticket."""
+from uuid import UUID
 import json
 import secrets
 import threading
@@ -72,7 +73,7 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
         def do_OPTIONS(self):
             if (self.headers.get('Host') != host
                     or self.headers.get('Origin') != public_origin
-                    or self.path not in ('/api/pair', '/api/chats', '/api/conversation', '/api/suggest', '/api/prepare-send', '/api/send', '/api/send-status', '/api/disconnect', '/api/attio-list', '/api/attio-linked', '/api/attio-link', '/api/attio-unlink', '/api/attio-create', '/api/attio-stage', '/api/attio-task', '/api/attio-complete', '/api/attio-contact')
+                    or self.path not in ('/api/pair', '/api/chats', '/api/conversation', '/api/suggest', '/api/prepare-send', '/api/send', '/api/send-status', '/api/disconnect', '/api/attio-list', '/api/attio-linked', '/api/attio-link', '/api/attio-unlink', '/api/attio-create', '/api/attio-stage', '/api/attio-task', '/api/attio-complete', '/api/attio-contact', '/api/attio-note')
                     or self.headers.get('Access-Control-Request-Method') != 'POST'):
                 return self.respond(403, {'error': '許可されていない接続元です。'})
             requested = {h.strip().lower() for h in self.headers.get('Access-Control-Request-Headers', '').split(',') if h.strip()}
@@ -91,6 +92,9 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
             if self.headers.get('Host') != host:
                 return self.respond(403, {'error': '接続元を確認できません。127.0.0.1のURLを開いてください。'})
             assets = {'/cloud.js': ('text/javascript; charset=utf-8', 'cloud.js'), '/cloud-config.json': ('application/json; charset=utf-8', 'cloud-config.json'), '/send.js': ('text/javascript; charset=utf-8', 'send.js'), '/attio.js': ('text/javascript; charset=utf-8', 'attio.js'), '/pipeline.js': ('text/javascript; charset=utf-8', 'pipeline.js')}
+            for script in ('marked.umd.js','note-editor.js'):
+                assets['/'+script] = ('text/javascript; charset=utf-8', script)
+            assets['/ui.css'] = ('text/css; charset=utf-8', 'ui.css')
             assets['/directory.js'] = ('text/javascript; charset=utf-8', 'directory.js')
             assets.update({
                 '/favicon.ico': ('image/x-icon', 'favicon.ico'),
@@ -127,7 +131,7 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
                 paired = is_public and bridge_token in sessions
             if self.headers.get('Host') != host or not (is_local or paired or (is_public and self.path == '/api/pair')):
                 return self.respond(403, {'error': 'このMacの画面で接続コードを発行し、公開サイトから接続し直してください。'})
-            routes = ('/api/attio/configure', '/api/attio/disconnect', '/api/attio/status', '/api/attio-list', '/api/attio-linked', '/api/attio-link', '/api/attio-unlink', '/api/attio-create', '/api/attio-stage', '/api/attio-task', '/api/attio-complete', '/api/attio-contact', '/api/prepare-send', '/api/send', '/api/send-status', '/api/chats', '/api/conversation', '/api/suggest', '/api/pair', '/api/pair-code', '/api/disconnect', '/api/cloud/status', '/api/cloud/enroll', '/api/cloud/disconnect')
+            routes = ('/api/attio/configure', '/api/attio/disconnect', '/api/attio/status', '/api/attio-list', '/api/attio-linked', '/api/attio-link', '/api/attio-unlink', '/api/attio-create', '/api/attio-stage', '/api/attio-task', '/api/attio-complete', '/api/attio-contact', '/api/attio-note', '/api/prepare-send', '/api/send', '/api/send-status', '/api/chats', '/api/conversation', '/api/suggest', '/api/pair', '/api/pair-code', '/api/disconnect', '/api/cloud/status', '/api/cloud/enroll', '/api/cloud/disconnect')
             if self.path not in routes:
                 return self.respond(404, {'error': 'この操作には対応していません。'})
             if (self.path == '/api/pair-code' or self.path.startswith('/api/cloud/') or self.path.startswith('/api/attio/')) and not is_local:
@@ -145,6 +149,25 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
                     return self.respond(200, attio.status())
                 if self.path == '/api/attio/disconnect':
                     return self.respond(200, attio.disconnect())
+                if self.path == '/api/attio-note':
+                    if 'note_id' not in data:
+                        if not is_local or not cloud:
+                            return self.respond(403, {'error':'Mac内の画面でログインしてください。'})
+                        person_id = str(UUID(data.get('person_id','')))
+                        workspace = str(UUID(attio.identity()['workspace_id']))
+                        rows = cloud.http('/rest/v1/line_attio_records?select=notes&object_type=eq.people'
+                                          '&workspace_id=eq.'+workspace+'&record_id=eq.'+person_id+'&limit=1', method='GET')
+                        return self.respond(200, {'notes': rows[0]['notes'] or [] if rows else []})
+                    note = attio.note(data)
+                    if 'body' in data:
+                        try:
+                            note['cached'] = bool(cloud and cloud.http('/rest/v1/rpc/line_update_attio_note_cache', {
+                                'p_workspace': attio.identity()['workspace_id'],
+                                'p_person': data['person_id'], 'p_note': note
+                            }))
+                        except RuntimeError:
+                            note['cached'] = False
+                    return self.respond(200, note)
                 if self.path == '/api/attio-list':
                     source=data.get('source','deals')
                     return self.respond(200, persist_attio(attio.page(data.get('offset',0),source),source))
