@@ -44,8 +44,30 @@ async function loadDevices(){
   $('cloudUse').disabled=busy||!devices.length;
   notice(devices.length?'接続するMacを選んでください。':'登録されたMacがありません。Macアプリを開き、その接続画面で同じアカウントにログインしてリモート接続を有効にしてください。');
 }
+// Saved directory records use the signed-in user's existing row policies.
+window.savedAttioDirectory = {
+  available: () => !local && Boolean(session),
+  async page(source, offset) {
+    if (!['companies', 'people'].includes(source)) throw new Error('取得する種類を選んでください。');
+    const query = new URLSearchParams({
+      select: 'record_id,data,fetched_at',
+      workspace_id: 'eq.4cc26a0e-26f3-4f1c-8202-d0afe3a07734',
+      object_type: 'eq.' + source,
+      order: 'record_id.asc',
+      limit: '51',
+      offset: String(offset)
+    });
+    const rows = await raw('/rest/v1/line_attio_records?' + query, undefined, {method:'GET'});
+    return {
+      source,
+      records: rows.slice(0, 50).map(row => ({...row.data, id:row.record_id, fetched_at:row.fetched_at})),
+      has_more: rows.length > 50
+    };
+  }
+};
 async function loggedIn(){
   $('cloudLogin').classList.add('hidden');$('cloudLoggedIn').classList.remove('hidden');$('cloudEmailLabel').textContent=session.user.email;
+  window.dispatchEvent(new Event('attiosessionready'));
   await loadDevices();if(deviceTimer)clearInterval(deviceTimer);
   deviceTimer=setInterval(()=>loadDevices().catch(e=>notice(e.message)),15000);
 }
