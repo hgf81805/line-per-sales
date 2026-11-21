@@ -41,6 +41,13 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
     allowed = {}
     lock = threading.RLock()
 
+    def persist_attio(result,source='deals'):
+        snapshot=result
+        if 'deal' in result:
+            snapshot={'profile':attio.identity(),'deals':[result['deal']] if result['deal'] else []}
+        result['storage']=cloud.store_attio(snapshot,source) if cloud else {'saved':False,'message':'Supabase保存にはMacアプリで起動し、リモート接続へログインしてください。'}
+        return result
+
     class PersonalHandler(BaseHTTPRequestHandler):
         local_csrf = csrf
         def log_message(self, *args):
@@ -139,7 +146,8 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
                 if self.path == '/api/attio/disconnect':
                     return self.respond(200, attio.disconnect())
                 if self.path == '/api/attio-list':
-                    return self.respond(200, attio.page(data.get('offset',0),data.get('source','deals')))
+                    source=data.get('source','deals')
+                    return self.respond(200, persist_attio(attio.page(data.get('offset',0),source),source))
                 if self.path in ('/api/attio-create','/api/attio-stage','/api/attio-task','/api/attio-complete'):
                     return self.respond(200, attio.mutate(self.path.split('-')[-1], data))
                 if self.path.startswith('/api/cloud/'):
@@ -214,10 +222,10 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
                 if self.path in ('/api/attio-linked','/api/attio-link','/api/attio-unlink'):
                     account = sender.chat(token,cid)['account_id']
                     if self.path == '/api/attio-linked':
-                        return self.respond(200, attio.linked(account,cid))
+                        return self.respond(200, persist_attio(attio.linked(account,cid)))
                     if self.path == '/api/attio-unlink':
                         return self.respond(200, attio.unlink(account,cid))
-                    return self.respond(200, attio.link(account,cid,data.get('deal_id')))
+                    return self.respond(200, persist_attio(attio.link(account,cid,data.get('deal_id'))))
                 if self.path == '/api/prepare-send':
                     return self.respond(200, sender.prepare(token, cid, data.get('text'), data.get('conversation_version')))
                 page = reader.message_page(token, cid)

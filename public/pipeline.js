@@ -7,7 +7,7 @@ const definitions=[
   {key:'won',title:'Won',label:'成約',description:'成約した案件'},
   {key:'lost',title:'Lost',label:'失注',description:'失注となった案件'}
 ];
-let deals=[],members=[],stages=[],loaded=false,nextOffset=0,more=false,epoch=0,loading=false;
+let deals=[],members=[],stages=[],loaded=false,nextOffset=0,more=false,epoch=0,loading=false,storageText='';
 const connected=()=>local||!$('connected').classList.contains('hidden');
 const element=(tag,text,className)=>{const node=document.createElement(tag);if(text!==undefined)node.textContent=text;if(className)node.className=className;return node;};
 function stageKey(title){const normalized=(title||'').trim().toLowerCase();return definitions.find(d=>normalized===d.key||normalized.startsWith(d.key+' '))?.key;}
@@ -44,7 +44,7 @@ function render(){
     $('board').append(lane);
   }
   $('boardMore').classList.toggle('hidden',!more);
-  if(loaded)$('boardNotice').textContent=deals.length+'件取得済み・絞り込み後'+visible.length+'件。'+(more?'まだ続きがあります。「次の50件を追加」で読み込めます。':'全件取得済み。');
+  if(loaded)$('boardNotice').textContent=deals.length+'件取得済み・絞り込み後'+visible.length+'件。'+(more?'まだ続きがあります。「次の50件を追加」で読み込めます。':'全件取得済み。')+storageText;
 }
 async function load(append=false){
   if(loading||busy||!connected())return;
@@ -53,6 +53,7 @@ async function load(append=false){
     const offset=append?nextOffset:0,data=await request('attio-list',{offset});
     if(current!==epoch)return;
     const combined=new Map((append?deals:[]).map(d=>[d.id,d]));for(const deal of data.deals)combined.set(deal.id,deal);
+    storageText=data.storage?.saved?' Supabaseに保存済み。':' '+(data.storage?.message||'Supabaseへの自動保存にはMacアプリv1.7が必要です。');
     deals=[...combined.values()];members=data.members;stages=data.stages;loaded=true;more=data.has_more;nextOffset=offset+data.deals.length;
     const previous=$('boardOwner').value;$('boardOwner').replaceChildren();const all=element('option','すべての担当者');all.value='';$('boardOwner').append(all);
     for(const member of members){const option=element('option',member.name);option.value=member.id;$('boardOwner').append(option);}if(members.some(m=>m.id===previous))$('boardOwner').value=previous;
@@ -63,7 +64,7 @@ async function load(append=false){
 $('boardRefresh').onclick=()=>load();$('boardMore').onclick=()=>load(true);
 $('boardSearch').oninput=render;$('boardOwner').onchange=render;
 window.addEventListener('connectionchange',()=>{
-  epoch++;deals=[];members=[];stages=[];loaded=false;more=false;nextOffset=0;$('boardSearch').value='';$('boardOwner').replaceChildren();const option=element('option','すべての担当者');option.value='';$('boardOwner').append(option);
+  epoch++;storageText='';deals=[];members=[];stages=[];loaded=false;more=false;nextOffset=0;$('boardSearch').value='';$('boardOwner').replaceChildren();const option=element('option','すべての担当者');option.value='';$('boardOwner').append(option);
   $('boardSummary').textContent='接続後にAttioの案件を表示します。';$('boardNotice').textContent='接続前は工程の流れだけを表示しています。';$('error').textContent='';render();controls();
   if(connected()){ $('status').textContent='';load(); }
 });

@@ -101,6 +101,30 @@ class CloudRelay:
         with self.lock:
             return dict(self.status)
 
+    def store_attio(self, result, source):
+        """Persist only display fields, under this Mac's authenticated owner."""
+        if not self.credentials or self.stop_event.is_set():
+            return {'saved':False,'message':'Supabase保存にはMac内の画面でリモート接続へログインしてください。'}
+        try:
+            if source not in ('deals','companies','people'):
+                raise ValueError('source')
+            workspace=str(uuid.UUID(result['profile']['workspace_id']))
+            records=result.get('deals',[]) if source=='deals' else result['records']
+            fields={'name','url','stage_id','stage','stage_since','owner_id','value','currency'} if source=='deals' else {'name','detail','job_title','url'}
+            self.access_token()
+            with self.lock:
+                owner=self.credentials['user_id']
+            fetched_at=time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime())
+            rows=[{'user_id':owner,'workspace_id':workspace,'object_type':source,
+                   'record_id':str(uuid.UUID(record['id'])),
+                   'data':{key:record[key] for key in fields if key in record},'fetched_at':fetched_at} for record in records]
+            if rows:
+                self.http('/rest/v1/line_attio_records?on_conflict=user_id,workspace_id,object_type,record_id',rows,
+                          headers={'Prefer':'resolution=merge-duplicates,return=minimal'})
+            return {'saved':True,'count':len(rows),'fetched_at':fetched_at}
+        except Exception:
+            return {'saved':False,'message':'Attioの取得は成功しましたがSupabaseへの保存に失敗しました。接続を確認して再取得してください。'}
+
     def publish_heartbeat(self):
         with self.lock:
             device_id = self.credentials['device_id']

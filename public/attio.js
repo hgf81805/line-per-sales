@@ -43,6 +43,7 @@ async function refresh(){
   options('attioDeal',snapshot.deals,d=>d.name+' · '+d.stage);options('attioStage',snapshot.stages,s=>s.title);options('attioOwner',snapshot.members,m=>m.name);
   const counts=new Map();for(const deal of snapshot.deals)counts.set(deal.stage,(counts.get(deal.stage)||0)+1);
   $('attioSummary').textContent=(snapshot.profile.workspace_name||'Attio')+' · 表示中'+snapshot.deals.length+'件（'+(offset+1)+'件目から）'+([...counts].map(([name,count])=>name+': '+count+'件').join(' / '));
+  $('attioSummary').textContent+=snapshot.storage?.saved?' · Supabaseに保存済み':' · '+(snapshot.storage?.message||'自動保存にはMacアプリv1.7が必要です。');
   if(selected){linked=await request('attio-linked',{chat_id:selected.id});showLinked();}
   else{linked=null;manageControls();}
 }
