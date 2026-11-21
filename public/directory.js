@@ -14,10 +14,12 @@ function render(){
   const filtered=records.filter(r=>[r.name,r.detail,r.job_title,...(r.emails||[]),...(r.phones||[])].filter(Boolean).join(' ').toLocaleLowerCase().includes(search));
   $('directoryCards').replaceChildren();
   for(const record of filtered){
-    const card=node('article');card.className='deal-card';card.append(node('h3',record.name));
+    const card=node('article');card.className='deal-card';
     if($('directorySource').value==='people'){
       const details=node('details');
-      details.append(node('summary','連絡先の詳細'));
+      const summary=node('summary',record.name);
+      summary.className='contact-card-title';
+      details.append(summary);
       const info=node('dl');
       const date=record.created_at?new Date(record.created_at):null;
       const fields=[
@@ -32,9 +34,40 @@ function render(){
       }
       if(!info.children.length)details.append(node('p','表示できる詳細はありません。'));
       else details.append(info);
-      details.style.whiteSpace='pre-wrap';
+      info.style.whiteSpace='pre-wrap';
+      const notes=node('section');
+      let notesLoaded=false;
+      details.addEventListener('toggle',async()=>{
+        if(!details.open||notesLoaded)return;
+        if(!window.savedAttioDirectory.available()){
+          notes.replaceChildren(node('p','ノートは公開ページにログインして確認できます。'));
+          return;
+        }
+        notesLoaded=true;
+        notes.replaceChildren(node('p','ノートを読み込んでいます…'));
+        try{
+          const entries=await window.savedAttioDirectory.notes(record.id);
+          if(!notes.isConnected)return;
+          notes.replaceChildren(node('h4','Attioノート'));
+          if(!entries.length)notes.append(node('p','保存済みのノートはありません。'));
+          for(const entry of entries){
+            const note=node('details');
+            const body=node('div',entry.body);
+            body.className='contact-note-body';
+            note.append(node('summary',entry.title||'ノート'),body);
+            notes.append(note);
+          }
+        }catch{
+          notesLoaded=false;
+          notes.replaceChildren(node('p','ノートを取得できませんでした。詳細を開き直して再試行してください。'));
+        }
+      });
+      details.append(notes);
       card.append(details);
-    }else if(record.detail)card.append(node('p',record.detail));
+    }else{
+      card.append(node('h3',record.name));
+      if(record.detail)card.append(node('p',record.detail));
+    }
     if(record.fetched_at){
       const timestamp=new Date(record.fetched_at);
       if(!Number.isNaN(timestamp.getTime()))card.append(node('p','Attioからの最終取得 '+timestamp.toLocaleString('ja-JP')));

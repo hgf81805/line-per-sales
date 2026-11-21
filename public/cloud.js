@@ -47,6 +47,14 @@ async function loadDevices(){
 // Saved directory records use the signed-in user's existing row policies.
 window.savedAttioDirectory = {
   available: () => !local && Boolean(session),
+  async notes(recordId) {
+    const query = new URLSearchParams({
+      select:'notes', workspace_id:'eq.4cc26a0e-26f3-4f1c-8202-d0afe3a07734',
+      object_type:'eq.people', record_id:'eq.' + recordId, limit:'1'
+    });
+    const rows = await raw('/rest/v1/line_attio_records?' + query, undefined, {method:'GET'});
+    return rows[0]?.notes || [];
+  },
   async page(source, offset) {
     if (!['companies', 'people'].includes(source)) throw new Error('取得する種類を選んでください。');
     const query = new URLSearchParams({
