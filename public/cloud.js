@@ -91,7 +91,7 @@ async function loggedIn(){
   if(saved&&!panel){
     activeDevice=saved.id;cloudActive=true;showConnected();controls();
     const badge=document.querySelector('#connected .badge');
-    if(badge)badge.textContent='クラウド経由 · 確認して送信';
+    if(badge)badge.textContent=Date.now()-new Date(saved.last_seen).getTime()<60000?'クラウド経由 · 確認して送信':'接続先のMacがオフラインです';
     window.dispatchEvent(new Event('connectionchange'));
   }
   if(!panel)return;
