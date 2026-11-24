@@ -1,7 +1,7 @@
 (() => {
 'use strict';
 const previous=controls;
-let current=null, running=false, version=null, autoPending=false;
+let current=null, running=false, version=null, autoPending=false, briefing=false;
 const element=(tag,text)=>{const node=document.createElement(tag);node.textContent=text;return node;};
 const button=(label,action)=>{const node=element('button',label);node.type='button';node.onclick=action;return node;};
 controls=function(){
@@ -10,11 +10,15 @@ controls=function(){
     current=selected?.id;
     autoPending=Boolean(selected);
     $('assistResult').replaceChildren();
+    $('briefResult').replaceChildren();
+    $('briefStatus').textContent='';
     $('assistStatus').textContent='';
     version=null;
   }
   $('salesAssist').classList.toggle('hidden',!selected);
   $('assistGenerate').disabled=busy||running||!selected;
+  $('meetingBrief').classList.toggle('hidden',!selected);
+  $('briefGenerate').disabled=busy||running||briefing||!selected;
   $('purposeDraft').disabled=busy||running||!selected;
   $('quickFollow').disabled=busy||running||!selected;
   $('followRefresh').disabled=busy||running;
@@ -117,6 +121,29 @@ async function generate(style='',draft='',fill=false){
   }catch(error){$('assistStatus').textContent=error.message;if(fill)$('salesAssist').open=true;}
   finally{running=false;controls();}
 }
+$('briefGenerate').onclick=async()=>{
+  if(busy||running||briefing||!selected)return;
+  const target=selected;
+  const root=$('briefResult'),status=$('briefStatus');
+  briefing=true;controls();
+  status.textContent='会話とAttioノートを確認しています…';
+  root.replaceChildren();
+  try{
+    const data=await request('sales-assist',{mode:'meeting-brief',chat_id:target.id});
+    if(selected!==target)return;
+    if(data.deal)root.append(element('p',data.deal.name+' · '+data.deal.stage));
+    for(const [key,label] of [['request','相手の要望'],['promise','前回の約束']]){
+      const fact=data[key];
+      root.append(element('h3',label),element('p',fact?.text||'確認できる記録がありません。'));
+      if(fact)evidence(root,{evidence:data.evidence,source:fact.source},'source');
+    }
+    const questions=document.createElement('ol');
+    for(const question of data.questions)questions.append(element('li',question));
+    root.append(element('h3','今回聞く3つ'),questions);
+    status.textContent=data.has_material ? (data.has_notes?'直近のLINE・保存済みAttioノートを参照':'直近のLINEを参照') : '確認できる資料がないため、基本の質問を表示しています。';
+  }catch(error){if(selected===target)status.textContent=error.message;}
+  finally{briefing=false;controls();}
+};
 $('assistGenerate').onclick=()=>generate();
 $('purposeDraft').onclick=()=>generate($('replyPurpose').value,'',true);
 $('quickFollow').onclick=async()=>{

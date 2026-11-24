@@ -365,6 +365,8 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
                 if self.path == '/api/sales-assist':
                     chat = sender.chat(token, cid)
                     crm = sales_assist.context(attio, cloud, chat['account_id'], cid)
+                    if data.get('mode') == 'meeting-brief':
+                        return self.respond(200, sales_assist.meeting_brief(items, crm))
                     draft = data.get('draft', '')
                     if not isinstance(draft, str) or len(draft) > 1000:
                         return self.respond(400, {'error': '下書きは1,000文字以内にしてください。'})

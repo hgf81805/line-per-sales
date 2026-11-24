@@ -163,7 +163,7 @@ class CloudRelay:
             user_id = self.credentials['user_id']
         result = self.http('/rest/v1/line_remote_devices?on_conflict=id', {
             'id': device_id, 'user_id': user_id, 'name': platform.node()[:100] or 'Mac',
-            'capabilities': ['read', 'confirmed-send-v1', 'attio-crm-v1', 'attio-directory-v1', 'attio-contact-v1', 'attio-note-edit-v1', 'sales-assist-v1', 'sales-desk-v1', 'followups-v1', 'paged-line-v1'],
+            'capabilities': ['read', 'confirmed-send-v1', 'attio-crm-v1', 'attio-directory-v1', 'attio-contact-v1', 'attio-note-edit-v1', 'sales-assist-v1', 'sales-desk-v1', 'followups-v1', 'paged-line-v1', 'meeting-brief-v1'],
             'last_seen': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), 'enabled': True,
         }, headers={'Prefer': 'resolution=merge-duplicates,return=minimal'})
         with self.lock:

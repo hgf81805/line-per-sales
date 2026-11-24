@@ -131,6 +131,7 @@ async function cloudJob(action,payload){
   if(action==='chats'&&(payload.count||payload.excluded?.length)&&!device.capabilities?.includes('followups-v1'))throw new Error('10件表示と非表示設定にはMacアプリv2.2が必要です。');
   if(action==='sales-assist'&&['agenda','follow-plan','follow-save'].includes(payload.mode)&&!device.capabilities?.includes('followups-v1'))throw new Error('フォロー管理にはMacアプリv2.2が必要です。');
   if(action==='chats'&&payload.paged&&!device.capabilities?.includes('paged-line-v1'))throw new Error('非表示の上限解除にはMacアプリv2.3が必要です。');
+  if(action==='sales-assist'&&payload.mode==='meeting-brief'&&!device.capabilities?.includes('meeting-brief-v1'))throw new Error('商談前ブリーフにはMacアプリv2.4が必要です。');
   const [job]=await raw('/rest/v1/line_remote_jobs',{user_id:session.user.id,device_id:activeDevice,action,payload},{headers:{Prefer:'return=representation'}});
   try{
     const deadline=Date.now()+245000;
