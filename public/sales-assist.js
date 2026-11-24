@@ -170,7 +170,12 @@ $('followRefresh').onclick=async()=>{
   list.replaceChildren(element('p','確認中…'));
   try{
     if(!window.salesDesk.hasChats()&&!(await $('loadChats').onclick()))throw new Error('先にLINE一覧を取得してください。');
-    const data=await request('sales-assist',{mode:'today',...(window.salesDesk.needsPagedList()?{chat_ids:window.salesDesk.chatIds()}:{} )});
+    const ids=window.salesDesk.chatIds(),items=[];
+    for(let offset=0;offset<ids.length;offset+=12){
+      const page=await request('sales-assist',{mode:'today',chat_ids:ids.slice(offset,offset+12)});
+      items.push(...page.items);
+    }
+    const data={items};
     window.salesDesk.showFollow(data.items);
     list.replaceChildren();
     for(const row of data.items){

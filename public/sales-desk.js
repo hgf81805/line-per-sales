@@ -165,19 +165,20 @@ async function load(query=''){
     await syncPreferences();
     const ids=pins().slice(0,12);
     const excluded=new Set(hiddenChats().map(row=>row.id));
-    const desired=query||ids.length?12:10;
-    const paged=excluded.size>50;
+    const desired=15;
+    const excludedPayload=excluded.size<=50?[...excluded]:[];
     const visible=new Map(), seenCursors=new Set();
     let cursor=null;
     do{
       const response=await request('chats',{
-        count:10,
+        count:desired, paged:true,
         ...(query?{query}:{}),
         ...(!cursor&&ids.length?{pins:ids}:{}),
-        ...(paged?{paged:true,...(cursor?{cursor}:{})}:excluded.size?{excluded:[...excluded]}:{})
+        ...(cursor?{cursor}:{}),
+        ...(excludedPayload.length?{excluded:excludedPayload}:{})
       });
       for(const chat of response.chats)if(!excluded.has(chat.id))visible.set(chat.id,chat);
-      cursor=paged?response.next_cursor:null;
+      cursor=response.next_cursor;
       if(cursor&&seenCursors.has(cursor))break;
       if(cursor)seenCursors.add(cursor);
     }while(cursor&&visible.size<desired);
@@ -226,7 +227,6 @@ $('pinChat').onclick=async()=>{
 window.salesDesk={
   hasChats:()=>chats.length>0,
   chatIds:()=>chats.map(chat=>chat.id),
-  needsPagedList:()=>hiddenChats().length>50,
   showFollow(items){
     follow=new Map(items.map(row=>[row.chat_id,row.reasons]));
     followChecked=true;render();

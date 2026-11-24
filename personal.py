@@ -242,7 +242,7 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
                         raise ValueError('invalid search')
                     excluded = data.get('excluded', [])
                     count = data.get('count', 5)
-                    if (type(count) is not int or count not in (5,10) or not isinstance(excluded,list)
+                    if (type(count) is not int or count not in (5,10,15) or not isinstance(excluded,list)
                             or len(excluded)>50 or any(not isinstance(item,str) or len(item)>256 for item in excluded)):
                         raise ValueError('invalid list')
                     expanded = bool(query.strip() or pins)
@@ -266,7 +266,7 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
                                 continue
                             found.append({'id':pinned,'title':current['title'],'updated':''})
                             seen.add(pinned)
-                    for _ in range(6 if count==10 else 3):
+                    for _ in range(6 if count>=10 else 3):
                         if len(found)>=limit:
                             break
                         params = {'type': 'single', 'limit': limit-len(found) if paged else limit}
@@ -316,7 +316,7 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
                         chats = list(allowed.items())
                     ids = data.get('chat_ids')
                     if ids is not None:
-                        if not isinstance(ids,list) or len(ids)>12 or any(not isinstance(cid,str) for cid in ids):
+                        if not isinstance(ids,list) or len(ids)>15 or any(not isinstance(cid,str) for cid in ids):
                             raise ValueError('invalid follow-up list')
                         chats = [(cid, row) for cid,row in chats if cid in ids]
                     def assess(chat_id):
