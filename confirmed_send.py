@@ -34,6 +34,7 @@ class ConfirmedSender:
         connection = sqlite3.connect(self.journal, timeout=10, isolation_level=None)
         os.chmod(self.journal, 0o600)
         connection.execute('create table if not exists attempts (ticket text primary key, status text not null, pending_id text, created real not null)')
+        connection.execute('create table if not exists accepted_targets (ticket text primary key, account text not null, chat text not null, accepted_at real not null)')
         return connection
 
     def receipt(self, ticket):
@@ -42,6 +43,14 @@ class ConfirmedSender:
         with closing(self.database()) as db:
             row = db.execute('select status,pending_id from attempts where ticket=?', (ticket,)).fetchone()
         return {'status': row[0], 'pending_message_id': row[1]} if row else None
+
+    def accepted_target(self, ticket):
+        self.status(ticket)
+        if not self.journal.exists():
+            return None
+        with closing(self.database()) as db:
+            row = db.execute('select account,chat,accepted_at from accepted_targets where ticket=?',(ticket,)).fetchone()
+        return row
 
     def chat(self, token, cid):
         chat = reader.http_json(reader.BEEPER_URL + '/v1/chats/' + quote(cid, safe=''), token=token)
@@ -99,7 +108,15 @@ class ConfirmedSender:
                 if response.get('chatID') != cid or not isinstance(pending, str) or not pending:
                     return {'status': 'unknown', 'pending_message_id': None}
                 with closing(self.database()) as db:
-                    db.execute('update attempts set status=?,pending_id=? where ticket=?', ('accepted',pending,ticket))
+                    db.execute('begin immediate')
+                    try:
+                        db.execute('update attempts set status=?,pending_id=? where ticket=?', ('accepted',pending,ticket))
+                        db.execute('insert into accepted_targets values(?,?,?,?)',
+                                   (ticket,current['account_id'],cid,time.time()))
+                        db.commit()
+                    except Exception:
+                        db.rollback()
+                        raise
                 self.tickets.pop(ticket, None)
                 return {'status': 'accepted', 'pending_message_id': pending}
             except Exception:

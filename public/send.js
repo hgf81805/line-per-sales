@@ -22,6 +22,7 @@ function resultNotice(result){
   if(result.status==='accepted'){
     $('sendNotice').textContent='Beeperが送信を受け付けました。LINE側への到達を確認してください。同じ操作は再送しません。';
     $('checkSend').classList.add('hidden');$('replyText').value='';messageId=null;conversationVersion=null;
+    if(ticket)window.dispatchEvent(new CustomEvent('line-send-accepted',{detail:{ticket_id:ticket.ticket_id,chat_id:ticket.chat_id}}));
   }else{
     $('sendNotice').textContent=result.status==='not_attempted'?'このMacに送信の記録が見つかりません。まずLINEで届いていないことを確認してください。':'送信結果が不明です。自動再送はしません。「送信結果を確認」またはLINEの実トークで確認してください。Beeperの書き込み権限も確認してください。';
     $('checkSend').classList.remove('hidden');

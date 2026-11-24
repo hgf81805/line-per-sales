@@ -128,6 +128,8 @@ async function cloudJob(action,payload){
   if(action==='attio-note'&&!device.capabilities?.includes('attio-note-edit-v1'))throw new Error('ノート編集にはMacアプリv1.9が必要です。');
   if(action==='sales-assist'&&!device.capabilities?.includes('sales-assist-v1'))throw new Error('営業アシストにはMacアプリv2.0が必要です。');
   if((action==='chats'&&(payload.query||payload.pins?.length)||action==='sales-assist'&&payload.mode==='overview')&&!device.capabilities?.includes('sales-desk-v1'))throw new Error('この機能にはMacアプリv2.1が必要です。');
+  if(action==='chats'&&(payload.count||payload.excluded?.length)&&!device.capabilities?.includes('followups-v1'))throw new Error('10件表示と非表示設定にはMacアプリv2.2が必要です。');
+  if(action==='sales-assist'&&['agenda','follow-plan','follow-save'].includes(payload.mode)&&!device.capabilities?.includes('followups-v1'))throw new Error('フォロー管理にはMacアプリv2.2が必要です。');
   const [job]=await raw('/rest/v1/line_remote_jobs',{user_id:session.user.id,device_id:activeDevice,action,payload},{headers:{Prefer:'return=representation'}});
   try{
     const deadline=Date.now()+245000;

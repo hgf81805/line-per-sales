@@ -77,6 +77,7 @@ class AttioBridge:
         db.execute('create table if not exists links (workspace text, account text, chat text, deal text not null, primary key(workspace,account,chat))')
         db.execute('create table if not exists operations (workspace text, operation text, fingerprint text, status text, result_id text, primary key(workspace,operation))')
         db.execute('create table if not exists contact_links (workspace text, account text, chat text, person text not null, primary key(workspace,account,chat))')
+        db.execute('create table if not exists send_followups (workspace text, task text, account text, chat text, sent real, replied integer not null default 0, primary key(workspace,task))')
         return db
 
     def http(self,path,body=None,method='GET',token=None):
@@ -140,6 +141,11 @@ class AttioBridge:
     def members(self):
         return [{'id':m['id']['workspace_member_id'],'name':(m.get('first_name','')+' '+m.get('last_name','')).strip() or m.get('email_address') or '担当者'} for m in self.http('/v2/workspace_members').get('data',[])]
 
+    def deal_page(self, offset, limit):
+        return [slim_deal(row) for row in self.http('/v2/objects/deals/records/query', {
+            'limit': limit, 'offset': offset, 'sorts': [{'attribute': 'created_at', 'direction': 'desc'}]
+        }, 'POST').get('data', [])]
+
     def page(self,offset=0,source='deals'):
         if not isinstance(offset,int) or not 0<=offset<=100000:raise AttioError('一覧ページを確認してください。')
         if source not in ('deals','companies','people'):raise AttioError('取得するデータの種類を選んでください。')
@@ -154,8 +160,8 @@ class AttioBridge:
     def deal(self,deal_id):
         return slim_deal(self.http('/v2/objects/deals/records/'+uuid(deal_id))['data'])
 
-    def tasks(self,deal_id,owner=None):
-        params={'linked_object':'deals','linked_record_id':uuid(deal_id),'is_completed':'false','limit':50}
+    def tasks(self,deal_id,owner=None,offset=0):
+        params={'linked_object':'deals','linked_record_id':uuid(deal_id),'is_completed':'false','limit':50,'offset':offset}
         if owner:params['assignee']=uuid(owner)
         query=urlencode(params)
         rows=self.http('/v2/tasks?'+query).get('data',[])

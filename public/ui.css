@@ -68,3 +68,5 @@ button.primary { background: var(--accent); }
 .chat-search input{flex:1;min-width:8rem}
 #chatOverviewStatus{font-weight:650}
 #salesAssist summary,#overviewNotes summary{cursor:pointer}
+
+#postSendFollowup[hidden], #postFollowForm[hidden] { display: none !important; }

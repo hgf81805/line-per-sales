@@ -2,6 +2,7 @@
 from uuid import UUID
 from concurrent.futures import ThreadPoolExecutor
 import sales_assist
+import followups
 import json
 import secrets
 import threading
@@ -94,7 +95,7 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
             if self.headers.get('Host') != host:
                 return self.respond(403, {'error': '接続元を確認できません。127.0.0.1のURLを開いてください。'})
             assets = {'/cloud.js': ('text/javascript; charset=utf-8', 'cloud.js'), '/cloud-config.json': ('application/json; charset=utf-8', 'cloud-config.json'), '/send.js': ('text/javascript; charset=utf-8', 'send.js'), '/attio.js': ('text/javascript; charset=utf-8', 'attio.js'), '/pipeline.js': ('text/javascript; charset=utf-8', 'pipeline.js')}
-            for script in ('marked.umd.js','note-editor.js','sales-assist.js','sales-desk.js','settings.js'):
+            for script in ('marked.umd.js','note-editor.js','sales-assist.js','sales-desk.js','settings.js','followups.js'):
                 assets['/'+script] = ('text/javascript; charset=utf-8', script)
             assets['/ui.css'] = ('text/css; charset=utf-8', 'ui.css')
             assets['/directory.js'] = ('text/javascript; charset=utf-8', 'directory.js')
@@ -213,14 +214,20 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
                     pins = data.get('pins',[])
                     if not isinstance(query,str) or len(query)>120 or not isinstance(pins,list) or len(pins)>12:
                         raise ValueError('invalid search')
+                    excluded = data.get('excluded', [])
+                    count = data.get('count', 5)
+                    if (type(count) is not int or count not in (5,10) or not isinstance(excluded,list)
+                            or len(excluded)>50 or any(not isinstance(item,str) or len(item)>256 for item in excluded)):
+                        raise ValueError('invalid list')
                     expanded = bool(query.strip() or pins)
-                    limit = 12 if expanded else 5
+                    limit = max(12 if expanded else 5,count)
+                    seen_exclusions = set(excluded)
                     found = []
                     cursor = None
                     seen = set()
                     if not query.strip():
                         for pinned in pins:
-                            if not isinstance(pinned,str) or not pinned or len(pinned)>512 or pinned in seen:
+                            if not isinstance(pinned,str) or not pinned or len(pinned)>512 or pinned in seen or pinned in seen_exclusions:
                                 continue
                             try:
                                 current = sender.chat(token,pinned)
@@ -228,7 +235,7 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
                                 continue
                             found.append({'id':pinned,'title':current['title'],'updated':''})
                             seen.add(pinned)
-                    for _ in range(3):
+                    for _ in range(6 if count==10 else 3):
                         if len(found)>=limit:
                             break
                         params = {'type': 'single', 'limit': limit}
@@ -241,7 +248,7 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
                         for c in page.get('items') or []:
                             if c.get('type') != 'single' or (c.get('network') or '').lower() != 'line' or c.get('merge') or c.get('mergedIntoChatID') or not c.get('id'):
                                 continue
-                            if c['id'] not in seen:
+                            if c['id'] not in seen and c['id'] not in seen_exclusions:
                                 seen.add(c['id'])
                                 found.append({'id': c['id'], 'title': c.get('title') or '名称未設定', 'updated': c.get('lastActivity') or c.get('lastActivityAt') or c.get('updatedAt') or ''})
                             if len(found) == limit:
@@ -260,6 +267,14 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
                     return self.respond(200, sender.status(data.get('ticket_id')))
                 if self.path == '/api/send':
                     return self.respond(200, sender.send(token, data.get('ticket_id')))
+                if self.path == '/api/sales-assist':
+                    mode = data.get('mode')
+                    if mode == 'agenda':
+                        return self.respond(200, followups.agenda(attio,sender,token,data.get('offset',0)))
+                    if mode == 'follow-plan':
+                        return self.respond(200, followups.plan(attio,sender,token,data))
+                    if mode == 'follow-save':
+                        return self.respond(200, followups.save(attio,sender,token,data))
                 if self.path == '/api/sales-assist' and data.get('mode') == 'today':
                     with lock:
                         chats = list(allowed.items())

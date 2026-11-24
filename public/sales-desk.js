@@ -8,6 +8,32 @@ function pins(){
   if(!scope)return [];
   try{return JSON.parse(localStorage.getItem('line-sales-pins:'+scope)||'[]');}catch{return [];}
 }
+function hiddenChats(){
+  const scope=window.salesDeskScope?.();
+  if(!scope)return [];
+  try{return JSON.parse(localStorage.getItem('line-sales-hidden:'+scope)||'[]');}catch{return [];}
+}
+function updateHidden(records){
+  const scope=window.salesDeskScope?.();
+  if(!scope)return false;
+  try{localStorage.setItem('line-sales-hidden:'+scope,JSON.stringify(records));return true;}
+  catch{$('chatFilterStatus').textContent='このブラウザに保存できませんでした。';return false;}
+}
+function renderHidden(){
+  const records=hiddenChats();
+  const area=$('hiddenChatItems');
+  area.replaceChildren();
+  $('hiddenChatSettings').hidden=!records.length;
+  for(const record of records){
+    const restore=make('button',record.title+' を戻す');
+    restore.type='button';
+    restore.disabled=busy;
+    restore.onclick=()=>{
+      if(!busy&&updateHidden(hiddenChats().filter(row=>row.id!==record.id)))load($('chatQuery').value.trim());
+    };
+    area.append(restore);
+  }
+}
 function isVisible(chat,marked){
   const filter=$('chatFilter').value;
   const reasons=follow.get(chat.id)||[];
@@ -54,7 +80,8 @@ async function load(query=''){
   $('name').textContent='相手を選んでください';$('chats').textContent='取得中…';
   try{
     const ids=pins();
-    const response=await request('chats',{...(query?{query}:{}),...(ids.length?{pins:ids}:{} )});
+    const excluded=hiddenChats().map(row=>row.id);
+    const response=await request('chats',{count:10,...(excluded.length?{excluded}:{}),...(query?{query}:{}),...(ids.length?{pins:ids}:{} )});
     chats=response.chats;
     render();
     return true;
@@ -64,6 +91,13 @@ async function load(query=''){
 $('loadChats').onclick=()=>{$('chatQuery').value='';return load();};
 $('chatSearchForm').onsubmit=event=>{event.preventDefault();load($('chatQuery').value.trim());};
 $('chatFilter').onchange=render;
+$('hideChat').onclick=()=>{
+  if(busy||!selected)return;
+  const records=hiddenChats();
+  if(records.length>=50||selected.id.length>256){$('chatFilterStatus').textContent='このトークを非表示にできません。';return;}
+  if(!confirm('「'+selected.title+'」をこのブラウザの一覧から隠しますか？'))return;
+  if(updateHidden([...records,{id:selected.id,title:selected.title}]))load($('chatQuery').value.trim());
+};
 $('pinChat').onclick=()=>{
   if(busy||!selected)return;
   const scope=window.salesDeskScope?.();
@@ -111,6 +145,8 @@ controls=function(){
   }
   $('chatOverview').classList.toggle('hidden',!selected);
   $('pinChat').disabled=busy||!selected;
+  $('hideChat').disabled=busy||!selected;
+  renderHidden();
   $('pinChat').textContent=pins().includes(selected?.id)?'ピン留め解除':'ピン留め';
   $('chatQuery').disabled=busy;
   $('chatFilter').disabled=busy;
