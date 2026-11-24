@@ -4,7 +4,7 @@ const baseControls=controls;
 let chats=[], follow=new Map(), followChecked=false, lastChat=null, pinScope=null;
 const make=(tag,text)=>{const node=document.createElement(tag);node.textContent=text;return node;};
 let synchronized=null, syncing=false, batch=false;
-const hideSelection=new Set(), restoreSelection=new Set();
+const hideSelection=new Set(), restoreSelection=new Set(), laterSelection=new Set();
 function stored(type,scope=window.salesDeskScope?.()){
   if(!scope)return [];
   try{
@@ -65,6 +65,8 @@ function renderLater(){
   const records=laterChats();
   $('laterChatSettings').hidden=!records.length;
   $('laterChatSummary').textContent='あとで見る（'+records.length+'件）';
+  const ids=new Set(records.map(row=>row.chat_id));
+  for(const id of laterSelection)if(!ids.has(id))laterSelection.delete(id);
   const items=$('laterChatItems');
   items.replaceChildren();
   for(const record of records){
@@ -85,7 +87,7 @@ function renderLater(){
       $('chatFilter').value='all';
       await load('',record.chat_id);
     };
-    row.append(label,open);
+    row.append(checkbox({id:record.chat_id,title:record.title||'トーク'},laterSelection),label,open);
     items.append(row);
   }
 }
@@ -154,6 +156,11 @@ function updateBatchControls(){
   $('chatBatchCount').textContent=hideSelection.size+'件選択';
   $('chatRestoreCount').textContent=restoreSelection.size+'件選択';
   $('chatBatchToggle').disabled=busy||syncing;
+  $('laterRestoreCount').textContent=laterSelection.size+'件選択';
+  $('laterRestoreSelected').disabled=busy||syncing||!laterSelection.size;
+  $('chatBatchLater').disabled=busy||syncing||!hideSelection.size;
+  $('chatBatchLaterSave').disabled=busy||syncing||!hideSelection.size;
+  if(!batch||!hideSelection.size)showBatchLater(false);
   $('chatBatchHide').disabled=busy||syncing||!hideSelection.size;
   $('chatBatchRestore').disabled=busy||syncing||!restoreSelection.size;
 }
@@ -234,17 +241,17 @@ function render(){
   $('followRefresh').classList.toggle('hidden',!statusFilter);
   $('chatFilterStatus').textContent=statusFilter&&!followChecked?'「対応状況を確認」を押してください。':'';
 }
-async function load(query='', openChat=null){
+async function load(query='', openChat=null, releasedIds=null){
   if(busy||syncing)return false;
   syncing=true;controls();
+  const scope=window.salesDeskScope?.();
   selected=null;messageId=null;conversationVersion=null;
   chats=[];follow.clear();followChecked=false;hideSelection.clear();
   $('history').replaceChildren();$('candidates').replaceChildren();
   $('name').textContent='相手を選んでください';$('chats').textContent='取得中…';
   try{
     await syncPreferences();
-    const released=await checkLater();
-    const ids=[...new Set([...(openChat?[openChat]:[]),...released.ids,...pins()])].slice(0,12);
+    const ids=[...new Set([...(openChat?[openChat]:[]),...(releasedIds||[]),...pins()])].slice(0,12);
     const excluded=new Set([...hiddenChats().map(row=>row.id),...laterChats().map(row=>row.chat_id)]);
     const desired=15;
     const excludedPayload=excluded.size<=50?[...excluded]:[];
@@ -267,12 +274,25 @@ async function load(query='', openChat=null){
     render();
     const found=openChat&&chats.find(row=>row.id===openChat);
     if(found)choose(found);
-    if(released.checkError)$('chatFilterStatus').textContent='あとで見るの新着確認：'+released.checkError;
+    if(releasedIds===null&&laterChats().length)void refreshDeferred(query,scope);
     return true;
   }catch(error){$('chats').textContent=error.message;return false;}
   finally{syncing=false;controls();}
 }
-$('loadChats').onclick=()=>{$('chatQuery').value='';return load();};
+async function refreshDeferred(query,scope){
+  // Let the browser paint the list before requesting deferred-chat updates.
+  await new Promise(resolve=>requestAnimationFrame(()=>setTimeout(resolve,0)));
+  if(busy||syncing||window.salesDeskScope?.()!==scope)return;
+  let released;
+  syncing=true;controls();
+  try{released=await checkLater();}
+  catch(error){released={ids:[],checkError:error.message};}
+  finally{syncing=false;controls();}
+  if(window.salesDeskScope?.()!==scope)return;
+  if(released.ids.length)await load(query,selected?.id,released.ids);
+  if(released.checkError)$('chatFilterStatus').textContent='あとで見るの新着確認：'+released.checkError;
+}
+$('loadChats').onclick=()=>{$('chatQuery').value='';$('chatFilter').value='all';return load();};
 $('chatSearchForm').onsubmit=event=>{event.preventDefault();load($('chatQuery').value.trim());};
 $('chatFilter').onchange=()=>{hideSelection.clear();render();};
 $('chatBatchToggle').onclick=()=>{
@@ -303,21 +323,59 @@ $('laterChat').onclick=()=>{
   if(open){$('laterReturnOn').min=jstToday();$('laterReturnOn').focus();}
 };
 $('laterCancel').onclick=()=>showLaterForm(false);
-$('laterChatForm').onsubmit=async event=>{
-  event.preventDefault();
-  if(busy||syncing||!selected)return;
-  const target=selected,returnOn=$('laterReturnOn').value;
-  if(target.id.length>256||(returnOn&&returnOn<jstToday())){
-    $('chatFilterStatus').textContent='戻す日またはトークを確認してください。';return;
+function showBatchLater(open){
+  $('chatBatchLaterForm').classList.toggle('hidden',!open);
+  $('chatBatchLater').setAttribute('aria-expanded',String(open));
+  if(!open)$('chatBatchReturnOn').value='';
+}
+$('chatBatchLater').onclick=()=>{
+  if(busy||syncing||!hideSelection.size)return;
+  showBatchLater(true);
+  $('chatBatchReturnOn').min=jstToday();
+  $('chatBatchReturnOn').focus();
+};
+$('chatBatchLaterCancel').onclick=()=>showBatchLater(false);
+async function deferChats(records,returnOn){
+  if(busy||syncing||!records.length)return false;
+  if(records.some(record=>record.id.length>256)||(returnOn&&returnOn<jstToday())){
+    $('chatFilterStatus').textContent='戻す日またはトークを確認してください。';
+    return false;
   }
   syncing=true;controls();
+  const deferredAt=new Date().toISOString();
   try{
-    await syncPreferences([{kind:'later',chat_id:target.id,title:target.title.slice(0,200),
-      active:true,deferred_at:new Date().toISOString(),return_on:returnOn||null}]);
-    showLaterForm(false);
-  }catch(error){$('chatFilterStatus').textContent=error.message;return;}
+    await syncPreferences(records.map(record=>({kind:'later',chat_id:record.id,title:record.title.slice(0,200),
+      active:true,deferred_at:deferredAt,return_on:returnOn||null})));
+    return true;
+  }catch(error){$('chatFilterStatus').textContent=error.message;return false;}
   finally{syncing=false;controls();}
-  await load($('chatQuery').value.trim());
+}
+$('laterChatForm').onsubmit=async event=>{
+  event.preventDefault();
+  if(selected&&await deferChats([selected],$('laterReturnOn').value)){
+    showLaterForm(false);
+    await load($('chatQuery').value.trim(),null,[]);
+  }
+};
+$('chatBatchLaterForm').onsubmit=async event=>{
+  event.preventDefault();
+  const records=chats.filter(record=>hideSelection.has(record.id));
+  if(await deferChats(records,$('chatBatchReturnOn').value)){
+    batch=false;
+    showBatchLater(false);
+    await load($('chatQuery').value.trim(),null,[]);
+  }
+};
+$('laterRestoreSelected').onclick=async()=>{
+  if(busy||syncing||!laterSelection.size)return;
+  const records=laterChats().filter(record=>laterSelection.has(record.chat_id));
+  syncing=true;controls();
+  try{await restoreLater(records);}
+  catch(error){$('chatFilterStatus').textContent=error.message;return;}
+  finally{syncing=false;controls();}
+  $('chatQuery').value='';
+  $('chatFilter').value='all';
+  await load('',null,records.map(record=>record.chat_id));
 };
 $('hideChat').onclick=async()=>{
   if(busy||syncing||!selected)return;
@@ -356,7 +414,7 @@ window.salesDesk={
 controls=function(){
   baseControls();
   const scope=window.salesDeskScope?.();
-  if(pinScope!==scope){synchronized=null;batch=false;hideSelection.clear();restoreSelection.clear();if(chats.length){chats=[];follow.clear();followChecked=false;render();}}
+  if(pinScope!==scope){synchronized=null;batch=false;hideSelection.clear();restoreSelection.clear();laterSelection.clear();if(chats.length){chats=[];follow.clear();followChecked=false;render();}}
   pinScope=scope;
   if(lastChat!==selected?.id){
     lastChat=selected?.id;
