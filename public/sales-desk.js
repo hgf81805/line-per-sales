@@ -18,19 +18,95 @@ function pins(){
 function hiddenChats(){
   return synchronized ? synchronized.filter(row=>row.kind==='hide').map(row=>({id:row.chat_id,title:row.title})) : stored('hidden');
 }
+function laterChats(){
+  return synchronized ? synchronized.filter(row=>row.kind==='later') : stored('later');
+}
+function jstToday(){
+  const fields=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Tokyo',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts();
+  const value=Object.fromEntries(fields.map(field=>[field.type,field.value]));
+  return value.year+'-'+value.month+'-'+value.day;
+}
+async function restoreLater(records){
+  const scope=window.salesDeskScope?.();
+  if(!scope||!records.length)return;
+  const released=records.map(({chat_id,deferred_at})=>({chat_id,deferred_at}));
+  if(synchronized){
+    for(let i=0;i<released.length;i+=12){
+      if(window.salesDeskScope?.()!==scope)throw new Error('接続が変わりました。');
+      const result=await window.syncSalesDeskPreferences(null,false,released.slice(i,i+12));
+      if(window.salesDeskScope?.()!==scope||!result.sync)throw new Error('接続が変わりました。');
+      synchronized=result.rows;
+    }
+  }else{
+    const restored=new Map(released.map(row=>[row.chat_id,row.deferred_at]));
+    const kept=stored('later',scope).filter(row=>restored.get(row.chat_id)!==row.deferred_at);
+    localStorage.setItem('line-sales-later:'+scope,JSON.stringify(kept));
+  }
+}
+async function checkLater(){
+  const pending=laterChats();
+  const today=jstToday();
+  const due=pending.filter(row=>row.return_on&&row.return_on<=today);
+  const waiting=pending.filter(row=>!row.return_on||row.return_on>today);
+  let checkError='';
+  for(let i=0;i<waiting.length;i+=12){
+    const batch=waiting.slice(i,i+12);
+    try{
+      const result=await request('sales-assist',{mode:'later-check',later:batch.map(({chat_id,deferred_at})=>({chat_id,deferred_at}))});
+      const replied=new Set(result.chat_ids);
+      due.push(...batch.filter(row=>replied.has(row.chat_id)));
+    }catch(error){checkError=error.message;break;}
+  }
+  await restoreLater(due);
+  const stillDeferred=new Set(laterChats().map(row=>row.chat_id));
+  return {ids:due.filter(row=>!stillDeferred.has(row.chat_id)).map(row=>row.chat_id),checkError};
+}
+function renderLater(){
+  const records=laterChats();
+  $('laterChatSettings').hidden=!records.length;
+  $('laterChatSummary').textContent='あとで見る（'+records.length+'件）';
+  const items=$('laterChatItems');
+  items.replaceChildren();
+  for(const record of records){
+    const row=make('div','');
+    row.className='desk-option';
+    const label=make('span',record.title||'トーク');
+    label.append(make('small',record.return_on?'戻す日 '+record.return_on:'新着が来たら戻す'));
+    const open=make('button','戻して開く');
+    open.type='button';
+    open.disabled=busy||syncing;
+    open.onclick=async()=>{
+      if(busy||syncing)return;
+      syncing=true;controls();
+      try{await restoreLater([record]);}
+      catch(error){$('chatFilterStatus').textContent=error.message;return;}
+      finally{syncing=false;controls();}
+      $('chatQuery').value='';
+      $('chatFilter').value='all';
+      await load('',record.chat_id);
+    };
+    row.append(label,open);
+    items.append(row);
+  }
+}
+function showLaterForm(open){
+  $('laterChatForm').classList.toggle('hidden',!open);
+  $('laterChat').setAttribute('aria-expanded',String(open));
+}
 async function syncPreferences(changes=[]){
   const scope=window.salesDeskScope?.();
-  if(!scope)return;
+  if(!scope)throw new Error('先にMacへ接続してください。');
   if(scope!==pinScope){pinScope=scope;synchronized=null;}
   let result=await window.syncSalesDeskPreferences();
   if(scope!==window.salesDeskScope?.())throw new Error('接続が変わりました。');
   if(!result.sync){
     if(changes.length){
       const isPin=changes[0].kind==='pin';
-      const key=isPin?'pins':'hidden';
+      const isLater=changes[0].kind==='later';
+      const key=isPin?'pins':isLater?'later':'hidden';
       const ids=new Set(changes.map(row=>row.chat_id));
-      const kept=stored(key,scope).filter(row=>!ids.has(isPin?row:row.id));
-      for(const change of changes)if(change.active)kept.push(isPin?change.chat_id:{id:change.chat_id,title:change.title});
+      const kept=stored(key,scope).filter(row=>!ids.has(isPin?row:isLater?row.chat_id:row.id));
+      for(const change of changes)if(change.active)kept.push(isPin?change.chat_id:isLater?change:{id:change.chat_id,title:change.title});
       localStorage.setItem('line-sales-'+key+':'+scope,JSON.stringify(kept));
     }
     return;
@@ -38,6 +114,7 @@ async function syncPreferences(changes=[]){
   const oldPins=stored('pins',scope).filter(id=>typeof id==='string'&&id.length>0&&id.length<=256).slice(0,12);
   const oldHidden=stored('hidden',scope).filter(row=>typeof row?.id==='string'&&row.id.length>0&&row.id.length<=256);
   const imported=[
+    ...stored('later',scope),
     ...oldPins.map(chat_id=>({chat_id,kind:'pin',active:true,title:''})),
     ...oldHidden.map(({id,title})=>({chat_id:id,kind:'hide',active:true,title:String(title||'トーク').slice(0,200)}))
   ];
@@ -49,6 +126,7 @@ async function syncPreferences(changes=[]){
   if(unique.length){
     localStorage.removeItem('line-sales-pins:'+scope);
     localStorage.removeItem('line-sales-hidden:'+scope);
+    localStorage.removeItem('line-sales-later:'+scope);
   }
   if(scope!==window.salesDeskScope?.())throw new Error('接続が変わりました。');
   for(let i=0;i<changes.length;i+=8){
@@ -156,7 +234,7 @@ function render(){
   $('followRefresh').classList.toggle('hidden',!statusFilter);
   $('chatFilterStatus').textContent=statusFilter&&!followChecked?'「対応状況を確認」を押してください。':'';
 }
-async function load(query=''){
+async function load(query='', openChat=null){
   if(busy||syncing)return false;
   syncing=true;controls();
   selected=null;messageId=null;conversationVersion=null;
@@ -165,8 +243,9 @@ async function load(query=''){
   $('name').textContent='相手を選んでください';$('chats').textContent='取得中…';
   try{
     await syncPreferences();
-    const ids=pins().slice(0,12);
-    const excluded=new Set(hiddenChats().map(row=>row.id));
+    const released=await checkLater();
+    const ids=[...new Set([...(openChat?[openChat]:[]),...released.ids,...pins()])].slice(0,12);
+    const excluded=new Set([...hiddenChats().map(row=>row.id),...laterChats().map(row=>row.chat_id)]);
     const desired=15;
     const excludedPayload=excluded.size<=50?[...excluded]:[];
     const visible=new Map(), seenCursors=new Set();
@@ -186,6 +265,9 @@ async function load(query=''){
     }while(cursor&&visible.size<desired);
     chats=[...visible.values()].slice(0,desired);
     render();
+    const found=openChat&&chats.find(row=>row.id===openChat);
+    if(found)choose(found);
+    if(released.checkError)$('chatFilterStatus').textContent='あとで見るの新着確認：'+released.checkError;
     return true;
   }catch(error){$('chats').textContent=error.message;return false;}
   finally{syncing=false;controls();}
@@ -213,6 +295,29 @@ $('chatBatchRestore').onclick=async()=>{
     restoreSelection.clear();
     await load($('chatQuery').value.trim());
   }
+};
+$('laterChat').onclick=()=>{
+  if(busy||syncing||!selected)return;
+  const open=$('laterChatForm').classList.contains('hidden');
+  showLaterForm(open);
+  if(open){$('laterReturnOn').min=jstToday();$('laterReturnOn').focus();}
+};
+$('laterCancel').onclick=()=>showLaterForm(false);
+$('laterChatForm').onsubmit=async event=>{
+  event.preventDefault();
+  if(busy||syncing||!selected)return;
+  const target=selected,returnOn=$('laterReturnOn').value;
+  if(target.id.length>256||(returnOn&&returnOn<jstToday())){
+    $('chatFilterStatus').textContent='戻す日またはトークを確認してください。';return;
+  }
+  syncing=true;controls();
+  try{
+    await syncPreferences([{kind:'later',chat_id:target.id,title:target.title.slice(0,200),
+      active:true,deferred_at:new Date().toISOString(),return_on:returnOn||null}]);
+    showLaterForm(false);
+  }catch(error){$('chatFilterStatus').textContent=error.message;return;}
+  finally{syncing=false;controls();}
+  await load($('chatQuery').value.trim());
 };
 $('hideChat').onclick=async()=>{
   if(busy||syncing||!selected)return;
@@ -255,6 +360,8 @@ controls=function(){
   pinScope=scope;
   if(lastChat!==selected?.id){
     lastChat=selected?.id;
+    showLaterForm(false);
+    $('laterReturnOn').value='';
     $('chatOverviewStatus').textContent='案件を確認中…';
     $('overviewNotes').open=false;
     $('overviewNotes').classList.add('hidden');
@@ -264,6 +371,9 @@ controls=function(){
   $('loadChats').disabled||=syncing;
   $('pinChat').disabled=busy||syncing||!selected;
   $('hideChat').disabled=busy||syncing||!selected;
+  $('laterChat').disabled=busy||syncing||!selected;
+  for(const field of $('laterChatForm').elements)field.disabled=busy||syncing;
+  renderLater();
   $('chats').querySelectorAll('input[type=checkbox]').forEach(check=>check.disabled=busy||syncing);
   renderHidden();
   $('pinChat').textContent=pins().includes(selected?.id)?'ピン留め解除':'ピン留め';

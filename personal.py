@@ -1,5 +1,6 @@
 """Loopback-only personal LINE UI. Text sending requires a short-lived confirmation ticket."""
 from uuid import UUID
+from datetime import date
 from concurrent.futures import ThreadPoolExecutor
 import sales_assist
 import followups
@@ -159,23 +160,41 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
                     if not cloud or not cloud.credentials:
                         return self.respond(200, {'sync':False,'rows':[]})
                     root = '/rest/v1/line_chat_preferences'
+                    if 'released' in data:
+                        released = data['released']
+                        if not isinstance(released,list) or not 1<=len(released)<=12:
+                            raise ValueError('invalid restore batch')
+                        for row in released:
+                            if (not isinstance(row,dict) or set(row)!={'chat_id','deferred_at'}
+                                or not isinstance(row['chat_id'],str) or not 1<=len(row['chat_id'])<=256
+                                or not followups.parse_date(row['deferred_at'])):
+                                raise ValueError('invalid restore row')
+                        cloud.http('/rest/v1/rpc/line_restore_later', {'p_rows':released})
                     if 'rows' in data:
                         rows = data['rows']
                         if not isinstance(rows,list) or not 1 <= len(rows) <= 62:
                             raise ValueError('invalid preferences')
                         for row in rows:
-                            if (not isinstance(row,dict) or set(row) != {'chat_id','kind','active','title'}
-                                or row['kind'] not in ('pin','hide') or type(row['active']) is not bool
+                            if (not isinstance(row,dict) or set(row)-{'chat_id','kind','active','title','deferred_at','return_on'}
+                                or not {'chat_id','kind','active','title'}<=set(row)
+                                or row['kind'] not in ('pin','hide','later') or type(row['active']) is not bool
                                 or not isinstance(row['chat_id'],str) or not 1 <= len(row['chat_id']) <= 256
                                 or not isinstance(row['title'],str) or len(row['title']) > 200):
                                 raise ValueError('invalid preference')
+                            if row['kind']=='later':
+                                if not followups.parse_date(row.get('deferred_at')):
+                                    raise ValueError('invalid deferred date')
+                                if row.get('return_on') is not None:
+                                    date.fromisoformat(row['return_on'])
+                            elif 'return_on' in row or 'deferred_at' in row:
+                                raise ValueError('invalid preference fields')
                         merge = 'ignore-duplicates' if data.get('import') is True else 'merge-duplicates'
                         cloud.http(root+'?on_conflict=user_id,kind,chat_id',rows,
                                    headers={'Prefer':'resolution='+merge+',missing=default,return=minimal'})
                     offset = data.get('offset',0)
                     if type(offset) is not int or offset < 0:
                         raise ValueError('invalid offset')
-                    rows = cloud.http(root+'?select=chat_id,kind,title&active=eq.true&order=kind,chat_id&limit=100&offset='+str(offset),
+                    rows = cloud.http(root+'?select=chat_id,kind,title,deferred_at,return_on&active=eq.true&order=kind,chat_id&limit=100&offset='+str(offset),
                                       method='GET')
                     return self.respond(200, {'sync':True,'rows':rows or []})
                 if self.path == '/api/attio-note':
@@ -305,6 +324,27 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
                     return self.respond(200, sender.send(token, data.get('ticket_id')))
                 if self.path == '/api/sales-assist':
                     mode = data.get('mode')
+                    if mode == 'later-check':
+                        entries = data.get('later')
+                        if not isinstance(entries,list) or len(entries)>12:
+                            raise ValueError('invalid deferred list')
+                        def replied(row):
+                            if not isinstance(row,dict):
+                                return None
+                            cid=row.get('chat_id')
+                            since=followups.parse_date(row.get('deferred_at'))
+                            if not isinstance(cid,str) or not 1<=len(cid)<=256 or not since:
+                                return None
+                            try:
+                                chat=sender.chat(token,cid)
+                                if followups.has_reply(sender,token,chat['account_id'],cid,since.timestamp()):
+                                    return cid
+                            except (RuntimeError,ValueError,OSError):
+                                pass
+                            return None
+                        with ThreadPoolExecutor(max_workers=4) as pool:
+                            ids=[cid for cid in pool.map(replied,entries) if cid]
+                        return self.respond(200,{'chat_ids':ids})
                     if mode == 'agenda':
                         return self.respond(200, followups.agenda(attio,sender,token,data.get('offset',0)))
                     if mode == 'follow-plan':

@@ -133,6 +133,7 @@ async function cloudJob(action,payload){
   if(action==='chats'&&payload.paged&&!device.capabilities?.includes('paged-line-v1'))throw new Error('非表示の上限解除にはMacアプリv2.3が必要です。');
   if(action==='sales-assist'&&payload.mode==='meeting-brief'&&!device.capabilities?.includes('meeting-brief-v1'))throw new Error('商談前ブリーフにはMacアプリv2.4が必要です。');
   if(action==='chats'&&payload.count===15&&!device.capabilities?.includes('line-list-15-v1'))payload={...payload,count:10};
+  if(action==='sales-assist'&&payload.mode==='later-check'&&!device.capabilities?.includes('later-chats-v1'))throw new Error('新着による復帰にはMacアプリv2.5が必要です。');
   const [job]=await raw('/rest/v1/line_remote_jobs',{user_id:session.user.id,device_id:activeDevice,action,payload},{headers:{Prefer:'return=representation'}});
   try{
     const deadline=Date.now()+245000;
@@ -163,19 +164,20 @@ window.linePushRequest=function(data){
   if(!session||!config)throw new Error('先にこの端末でログインしてください。');
   return raw('/functions/v1/line-push',data);
 };
-window.salesDeskScope=()=>local?'local':session&&activeDevice?session.user.id+':'+activeDevice:null;
-window.syncSalesDeskPreferences=async function(rows, importing=false){
+window.salesDeskScope=()=>local?'local':session&&activeDevice?session.user.id+':'+activeDevice:bridgeToken?'paired':null;
+window.syncSalesDeskPreferences=async function(rows, importing=false, released=null){
   if(!local&&(!session||!activeDevice||!config))return {sync:false,rows:[]};
   const root='/rest/v1/line_chat_preferences';
   if(rows&&!local){
     const resolution=importing?'ignore-duplicates':'merge-duplicates';
     await raw(root+'?on_conflict=user_id,kind,chat_id',rows,{headers:{Prefer:'resolution='+resolution+',missing=default,return=minimal'}});
   }
+  if(released&&!local)await raw('/rest/v1/rpc/line_restore_later',{p_rows:released});
   const preferences=[];
   for(let offset=0;;offset+=100){
     const result=local
-      ? await localRequest('chat-preferences',{offset,...(offset===0&&rows?{rows,import:importing}:{})})
-      : {sync:true,rows:await raw(root+'?select=chat_id,kind,title&active=eq.true&order=kind,chat_id&limit=100&offset='+offset,undefined,{method:'GET'})};
+      ? await localRequest('chat-preferences',{offset,...(offset===0&&rows?{rows,import:importing}:{}),...(offset===0&&released?{released}:{})})
+      : {sync:true,rows:await raw(root+'?select=chat_id,kind,title,deferred_at,return_on&active=eq.true&order=kind,chat_id&limit=100&offset='+offset,undefined,{method:'GET'})};
     if(!result.sync)return result;
     preferences.push(...result.rows);
     if(result.rows.length<100)return {sync:true,rows:preferences};

@@ -96,3 +96,5 @@ a.button { display: inline-flex; align-items: center; }
 @media (pointer: coarse), (max-width: 600px) {
   button, a.button { min-height: 42px; }
 }
+
+#laterChatItems .desk-option { justify-content: space-between; }
