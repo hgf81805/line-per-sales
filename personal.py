@@ -1,5 +1,6 @@
 """Loopback-only personal LINE UI. Text sending requires a short-lived confirmation ticket."""
 from uuid import UUID
+from concurrent.futures import ThreadPoolExecutor
 import sales_assist
 import json
 import secrets
@@ -93,7 +94,7 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
             if self.headers.get('Host') != host:
                 return self.respond(403, {'error': '接続元を確認できません。127.0.0.1のURLを開いてください。'})
             assets = {'/cloud.js': ('text/javascript; charset=utf-8', 'cloud.js'), '/cloud-config.json': ('application/json; charset=utf-8', 'cloud-config.json'), '/send.js': ('text/javascript; charset=utf-8', 'send.js'), '/attio.js': ('text/javascript; charset=utf-8', 'attio.js'), '/pipeline.js': ('text/javascript; charset=utf-8', 'pipeline.js')}
-            for script in ('marked.umd.js','note-editor.js','sales-assist.js','settings.js'):
+            for script in ('marked.umd.js','note-editor.js','sales-assist.js','sales-desk.js','settings.js'):
                 assets['/'+script] = ('text/javascript; charset=utf-8', script)
             assets['/ui.css'] = ('text/css; charset=utf-8', 'ui.css')
             assets['/directory.js'] = ('text/javascript; charset=utf-8', 'directory.js')
@@ -208,11 +209,31 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
                             sessions.pop(bridge_token, None)
                     return self.respond(200, {'ok': True})
                 if self.path == '/api/chats':
+                    query = data.get('query','')
+                    pins = data.get('pins',[])
+                    if not isinstance(query,str) or len(query)>120 or not isinstance(pins,list) or len(pins)>12:
+                        raise ValueError('invalid search')
+                    expanded = bool(query.strip() or pins)
+                    limit = 12 if expanded else 5
                     found = []
                     cursor = None
                     seen = set()
+                    if not query.strip():
+                        for pinned in pins:
+                            if not isinstance(pinned,str) or not pinned or len(pinned)>512 or pinned in seen:
+                                continue
+                            try:
+                                current = sender.chat(token,pinned)
+                            except (RuntimeError, ValueError, OSError):
+                                continue
+                            found.append({'id':pinned,'title':current['title'],'updated':''})
+                            seen.add(pinned)
                     for _ in range(3):
-                        params = {'type': 'single', 'limit': 5}
+                        if len(found)>=limit:
+                            break
+                        params = {'type': 'single', 'limit': limit}
+                        if query.strip():
+                            params.update(query=query.strip(),scope='titles')
                         if cursor:
                             params.update(cursor=cursor, direction='before')
                         page = metadata_page(reader.http_json(
@@ -223,10 +244,10 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
                             if c['id'] not in seen:
                                 seen.add(c['id'])
                                 found.append({'id': c['id'], 'title': c.get('title') or '名称未設定', 'updated': c.get('lastActivity') or c.get('lastActivityAt') or c.get('updatedAt') or ''})
-                            if len(found) == 5:
+                            if len(found) == limit:
                                 break
                         next_cursor = page.get('oldestCursor')
-                        if len(found) == 5 or not page.get('hasMore') or not next_cursor or next_cursor == cursor:
+                        if len(found) == limit or not page.get('hasMore') or not next_cursor or next_cursor == cursor:
                             break
                         cursor = next_cursor
                     with lock:
@@ -242,23 +263,31 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
                 if self.path == '/api/sales-assist' and data.get('mode') == 'today':
                     with lock:
                         chats = list(allowed.items())
-                    results = []
-                    for chat_id, _ in chats:
+                    def assess(chat_id):
                         try:
                             chat = sender.chat(token, chat_id)
                             page = reader.message_page(token, chat_id)
                             items = sorted(page.get('items') or [], key=reader.message_order)
                             crm = sales_assist.context(attio, None, chat['account_id'], chat_id)
                             reasons = sales_assist.follow_reasons(items, crm)
-                            if reasons:
-                                results.append({'chat_id': chat_id, 'reasons': reasons})
+                            return {'chat_id': chat_id, 'reasons': reasons} if reasons else None
                         except (RuntimeError, ValueError, OSError):
-                            results.append({'chat_id': chat_id, 'reasons': ['確認できませんでした']})
-                    return self.respond(200, {'items': results})
+                            return {'chat_id': chat_id, 'reasons': ['確認できませんでした']}
+                    with ThreadPoolExecutor(max_workers=4) as pool:
+                        results = list(pool.map(assess, (chat_id for chat_id, _ in chats)))
+                    return self.respond(200, {'items': [item for item in results if item]})
                 cid = data.get('chat_id')
                 with lock:
                     if not isinstance(cid, str) or cid not in allowed:
                         return self.respond(400, {'error': '一覧からLINEの1対1トークを選んでください。'})
+                if self.path == '/api/sales-assist' and data.get('mode') == 'overview':
+                    chat = sender.chat(token,cid)
+                    overview = sales_assist.context(attio,cloud,chat['account_id'],cid)
+                    overview['notes'] = [
+                        {'title': str(note.get('title',''))[:250], 'body': str(note.get('body',''))[:4000]}
+                        for note in overview['notes']
+                    ]
+                    return self.respond(200,overview)
                 if self.path == '/api/attio-contact':
                     chat = sender.chat(token,cid)
                     result = attio.contact(chat['account_id'],cid,chat['title'],data)

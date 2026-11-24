@@ -15,6 +15,8 @@ controls=function(){
   }
   $('salesAssist').classList.toggle('hidden',!selected);
   $('assistGenerate').disabled=busy||running||!selected;
+  $('purposeDraft').disabled=busy||running||!selected;
+  $('quickFollow').disabled=busy||running||!selected;
   $('followRefresh').disabled=busy||running;
   $('assistResult').querySelectorAll('button').forEach(node=>node.disabled=busy||running);
   if(autoPending&&!busy&&!running){
@@ -35,19 +37,34 @@ function evidence(container,data,key){
                  element('p',(source.title||source.speaker)+'：'+source.text));
   container.append(details);
 }
-async function generate(style='',draft=''){
+function fillReply(text){
+  if(!version||version!==conversationVersion||$('replyText').disabled){
+    $('assistStatus').textContent='会話を読み込み直してから返信案を再作成してください。';
+    $('salesAssist').open=true;
+    return;
+  }
+  $('replyText').value=text;
+  $('replyText').dispatchEvent(new Event('input'));
+  $('replyText').focus();
+}
+async function generate(style='',draft='',fill=false){
   if(busy||running||!selected)return;
   const chat=selected.id;
   running=true;controls();
   $('assistStatus').textContent='営業アシストを作成中…';
   try{
-    if(!conversationVersion)await $('loadHistory').onclick();
+    if(!conversationVersion){
+      await $('loadHistory').onclick();
+      try{window.salesDesk.showOverview(await request('sales-assist',{chat_id:chat,mode:'overview'}));}
+      catch{window.salesDesk.showOverview({});}
+    }
     const data=await request('sales-assist',{chat_id:chat,style,draft});
     if(selected?.id!==chat)return;
     version=data.version;
     const panel=$('assistResult');
     panel.replaceChildren();
     for(const [field,label] of [['request','相手の要望'],['promise','前回の約束'],['question','未回答の質問']]){
+      if(!data[field]||data[field]==='要確認')continue;
       panel.append(element('h3',label),element('p',data[field]));
       evidence(panel,data,field+'_source');
     }
@@ -56,15 +73,7 @@ async function generate(style='',draft=''){
       for(const [key,label] of [['short','短く'],['warm','やわらかく'],['schedule','日程調整に進める']]){
         panel.append(button(label,()=>generate(key,data.reply)));
       }
-      panel.append(button('返信欄に入れる',()=>{
-        if(!version||version!==conversationVersion||$('replyText').disabled){
-          $('assistStatus').textContent='会話が更新されています。会話を読み込み直してから営業アシストを再作成してください。';
-          return;
-        }
-        $('replyText').value=data.reply;
-        $('replyText').dispatchEvent(new Event('input'));
-        $('replyText').focus();
-      }));
+      panel.append(button('返信欄に入れる',()=>fillReply(data.reply)));
     }
     const stageNames={lead:'見込み',in_progress:'商談中',won:'成約',lost:'失注'};
     const stage=data.deal ? stageNames[data.stage] : data.crm_available?'見込み':'';
@@ -102,29 +111,45 @@ async function generate(style='',draft=''){
         controls();
       }catch(error){$('assistStatus').textContent=error.message;}
     }));
-    $('assistStatus').textContent=data.crm_available?'':'Attioの案件を確認できませんでした。LINEの情報から作成しました。';
-  }catch(error){$('assistStatus').textContent=error.message;}
+    if(fill&&data.reply){$('assistStatus').textContent='';running=false;controls();fillReply(data.reply);}
+    else if(fill){$('assistStatus').textContent='返信案を作成できませんでした。';$('salesAssist').open=true;}
+    if(!fill)$('assistStatus').textContent=data.crm_available?'':'Attioの案件を確認できませんでした。LINEの情報から作成しました。';
+  }catch(error){$('assistStatus').textContent=error.message;if(fill)$('salesAssist').open=true;}
   finally{running=false;controls();}
 }
 $('assistGenerate').onclick=()=>generate();
+$('purposeDraft').onclick=()=>generate($('replyPurpose').value,'',true);
+$('quickFollow').onclick=async()=>{
+  if(busy||running||!selected)return;
+  try{
+    const deal=await window.refreshAttioSales();
+    $('attioSales').scrollIntoView({block:'start'});
+    if(deal){
+      if(!$('attioTaskText').value)$('attioTaskText').value='フォローする';
+      $('attioDeadline').focus();
+    }else{
+      const input=$('attioNewName');
+      input.value=selected.title;
+      const details=input.closest('details');
+      if(details)details.open=true;
+      input.focus();
+    }
+    controls();
+  }catch(error){$('assistStatus').textContent=error.message;$('salesAssist').open=true;}
+};
 $('followRefresh').onclick=async()=>{
   if(busy||running)return;
   const list=$('followResults');
   list.replaceChildren(element('p','確認中…'));
   try{
-    await $('loadChats').onclick();
-    const chats=new Map([...document.querySelectorAll('.chat-button')].map(chat=>[chat.dataset.chatId,chat]));
+    if(!window.salesDesk.hasChats()&&!(await $('loadChats').onclick()))throw new Error('先にLINE一覧を取得してください。');
     const data=await request('sales-assist',{mode:'today'});
+    window.salesDesk.showFollow(data.items);
     list.replaceChildren();
     for(const row of data.items){
-      const chat=chats.get(row.chat_id);
-      if(!chat)continue;
-      const open=button(chat.firstChild.textContent+' · '+row.reasons.join('／'),()=>{
-        if(busy||running)return;
-        if(!chat.isConnected){list.replaceChildren(element('p','最近のトークを確認し直してください。'));return;}
-        chat.click();
-        $('salesAssist').scrollIntoView({block:'start'});
-      });
+      const title=window.salesDesk.label(row.chat_id);
+      if(!title)continue;
+      const open=button(title+' · '+row.reasons.join('／'),()=>window.salesDesk.open(row.chat_id));
       list.append(open);
     }
     if(!list.children.length)list.append(element('p','確認できたトークにフォロー項目はありません。'));

@@ -1,6 +1,6 @@
 """Read-only sales context and local AI proposals."""
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from contextlib import closing
 
 import beeper_reader as reader
@@ -44,7 +44,11 @@ def follow_reasons(items, crm):
                     deadlines.append(date)
             except (KeyError, AttributeError, ValueError):
                 continue
-        if any(date < datetime.now(timezone.utc) for date in deadlines):
+        now = datetime.now(timezone.utc)
+        japan = timezone(timedelta(hours=9))
+        if any(date >= now and date.astimezone(japan).date() == now.astimezone(japan).date() for date in deadlines):
+            reasons.append('今日が期限')
+        if any(date < now for date in deadlines):
             reasons.append('期限超過')
         if not deadlines:
             reasons.append('次の予定が未設定')
@@ -60,7 +64,10 @@ def generate(items, crm, style, draft):
     notes = [{'title': str(row.get('title',''))[:200], 'text': str(row.get('body',''))[:1500]}
              for row in crm['notes']]
     evidence = {str(i): row for i,row in enumerate(history + notes, 1)}
-    styles = {'short':'短く', 'warm':'やわらかく', 'schedule':'日程調整に進める'}
+    styles = {'short':'短く', 'warm':'やわらかく', 'schedule':'日程調整。確定していない候補は相手に確認する',
+              'materials':'資料送付。資料の添付や送付を事実として断定しない',
+              'followup':'返信がない相手へのフォロー。相手を急かさず次に聞くことを一つに絞る',
+              'thanks':'お礼。根拠に沿って具体的に感謝を伝える'}
     fields = ['request', 'promise', 'question', 'reply', 'next_action', 'stage', 'deadline', 'reason',
               'request_source', 'promise_source', 'question_source', 'action_source', 'stage_source']
     response = reader.http_json(reader.OLLAMA_URL + '/api/generate', method='POST', data={

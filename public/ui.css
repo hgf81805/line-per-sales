@@ -63,3 +63,8 @@ button.primary { background: var(--accent); }
 #assistResult button, #followResults button { margin: 4px 6px 4px 0; }
 #assistResult p { white-space: pre-wrap; overflow-wrap: anywhere; }
 #assistResult details { margin-bottom: 12px; }
+
+.chat-search{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin:0 0 1rem}
+.chat-search input{flex:1;min-width:8rem}
+#chatOverviewStatus{font-weight:650}
+#salesAssist summary,#overviewNotes summary{cursor:pointer}
