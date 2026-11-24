@@ -96,5 +96,3 @@ a.button { display: inline-flex; align-items: center; }
 @media (pointer: coarse), (max-width: 600px) {
   button, a.button { min-height: 42px; }
 }
-
-#followRefresh[hidden]{display:none!important}

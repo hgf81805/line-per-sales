@@ -153,7 +153,7 @@ function render(){
   updateBatchControls();
   if(!visible.length)$('chats').textContent=chats.length?'該当するトークはありません。':'トークがありません。';
   const statusFilter=['reply','due'].includes($('chatFilter').value);
-  $('followRefresh').hidden=!statusFilter;
+  $('followRefresh').classList.toggle('hidden',!statusFilter);
   $('chatFilterStatus').textContent=statusFilter&&!followChecked?'「対応状況を確認」を押してください。':'';
 }
 async function load(query=''){
