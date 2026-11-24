@@ -166,8 +166,8 @@ $('quickFollow').onclick=async()=>{
 };
 $('followRefresh').onclick=async()=>{
   if(busy||running)return;
-  const list=$('followResults');
-  list.replaceChildren(element('p','確認中…'));
+  const status=$('chatFilterStatus');
+  status.textContent='対応状況を確認中…';
   try{
     if(!window.salesDesk.hasChats()&&!(await $('loadChats').onclick()))throw new Error('先にLINE一覧を取得してください。');
     const ids=window.salesDesk.chatIds(),items=[];
@@ -175,18 +175,8 @@ $('followRefresh').onclick=async()=>{
       const page=await request('sales-assist',{mode:'today',chat_ids:ids.slice(offset,offset+12)});
       items.push(...page.items);
     }
-    const data={items};
-    window.salesDesk.showFollow(data.items);
-    list.replaceChildren();
-    for(const row of data.items){
-      const title=window.salesDesk.label(row.chat_id);
-      if(!title)continue;
-      const open=button(title+' · '+row.reasons.join('／'),()=>window.salesDesk.open(row.chat_id));
-      list.append(open);
-    }
-    if(!list.children.length)list.append(element('p','確認できたトークにフォロー項目はありません。'));
-  }catch(error){list.replaceChildren(element('p',error.message));}
+    window.salesDesk.showFollow(items);
+  }catch(error){status.textContent=error.message;}
 };
-window.addEventListener('connectionchange',()=>$('followResults').replaceChildren());
 controls();
 })();

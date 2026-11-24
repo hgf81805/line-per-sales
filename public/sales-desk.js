@@ -152,14 +152,16 @@ function render(){
   $('chats').replaceChildren(fragment);
   updateBatchControls();
   if(!visible.length)$('chats').textContent=chats.length?'該当するトークはありません。':'トークがありません。';
-  $('chatFilterStatus').textContent=['reply','due'].includes($('chatFilter').value)&&!followChecked?'「最近のトークを確認」で対応状況を取得してください。':'';
+  const statusFilter=['reply','due'].includes($('chatFilter').value);
+  $('followRefresh').hidden=!statusFilter;
+  $('chatFilterStatus').textContent=statusFilter&&!followChecked?'「対応状況を確認」を押してください。':'';
 }
 async function load(query=''){
   if(busy||syncing)return false;
   syncing=true;controls();
   selected=null;messageId=null;conversationVersion=null;
   chats=[];follow.clear();followChecked=false;hideSelection.clear();
-  $('followResults').replaceChildren();$('history').replaceChildren();$('candidates').replaceChildren();
+  $('history').replaceChildren();$('candidates').replaceChildren();
   $('name').textContent='相手を選んでください';$('chats').textContent='取得中…';
   try{
     await syncPreferences();
@@ -231,8 +233,6 @@ window.salesDesk={
     follow=new Map(items.map(row=>[row.chat_id,row.reasons]));
     followChecked=true;render();
   },
-  open(id){const chat=chats.find(row=>row.id===id);if(chat)choose(chat);},
-  label(id){return chats.find(row=>row.id===id)?.title;},
   showOverview(data){
     const task=data.tasks?.slice().sort((a,b)=>(a.deadline||'9999').localeCompare(b.deadline||'9999'))[0];
     $('chatOverviewStatus').textContent=data.deal
