@@ -83,9 +83,8 @@ function renderLater(){
       try{await restoreLater([record]);}
       catch(error){$('chatFilterStatus').textContent=error.message;return;}
       finally{syncing=false;controls();}
-      $('chatQuery').value='';
-      $('chatFilter').value='all';
-      await load('',record.chat_id);
+      const restored=applyRestoredChats([record]);
+      if(restored.length)choose(restored[0]);
     };
     row.append(checkbox({id:record.chat_id,title:record.title||'トーク'},laterSelection),label,open);
     items.append(row);
@@ -241,6 +240,31 @@ function render(){
   $('followRefresh').classList.toggle('hidden',!statusFilter);
   $('chatFilterStatus').textContent=statusFilter&&!followChecked?'「対応状況を確認」を押してください。':'';
 }
+function applyVisibility(){
+  const excluded=new Set([...hiddenChats().map(row=>row.id),...laterChats().map(row=>row.chat_id)]);
+  if(selected&&excluded.has(selected.id)){
+    selected=null;messageId=null;conversationVersion=null;
+    $('history').replaceChildren();$('candidates').replaceChildren();
+    $('name').textContent='相手を選んでください';
+  }
+  chats=chats.filter(chat=>!excluded.has(chat.id)).slice(0,15);
+  hideSelection.clear();
+  render();controls();
+  return excluded;
+}
+function applyRestoredChats(records){
+  $('chatQuery').value='';
+  $('chatFilter').value='all';
+  const existing=new Map(chats.map(chat=>[chat.id,chat]));
+  const restored=records.map(record=>{
+    const id=record.chat_id||record.id;
+    return existing.get(id)||{id,title:record.title||'トーク'};
+  });
+  const incoming=new Set(restored.map(chat=>chat.id));
+  chats=[...restored,...chats.filter(chat=>!incoming.has(chat.id))];
+  applyVisibility();
+  return restored.filter(chat=>chats.includes(chat));
+}
 async function load(query='', openChat=null, releasedIds=null){
   if(busy||syncing)return false;
   syncing=true;controls();
@@ -252,18 +276,7 @@ async function load(query='', openChat=null, releasedIds=null){
   try{
     await syncPreferences();
     const ids=[...new Set([...(openChat?[openChat]:[]),...(releasedIds||[]),...pins()])].slice(0,12);
-    const excluded=new Set([...hiddenChats().map(row=>row.id),...laterChats().map(row=>row.chat_id)]);
-    if(selected&&excluded.has(selected.id)){
-      selected=null;messageId=null;conversationVersion=null;
-      $('history').replaceChildren();$('candidates').replaceChildren();
-      $('name').textContent='相手を選んでください';
-      controls();
-    }
-    const allowed=chats.filter(chat=>!excluded.has(chat.id));
-    if(allowed.length!==chats.length){
-      chats=allowed;
-      render();
-    }
+    const excluded=applyVisibility();
     const desired=15;
     const excludedPayload=excluded.size<=50?[...excluded]:[];
     const visible=new Map(), seenCursors=new Set();
@@ -328,13 +341,13 @@ $('chatBatchHide').onclick=async()=>{
     return;
   }
   if(!confirm(records.length+'件のトークを一覧から隠しますか？'))return;
-  if(await updatePreferences('hide',records,true)){batch=false;await load($('chatQuery').value.trim());}
+  if(await updatePreferences('hide',records,true)){batch=false;applyVisibility();}
 };
 $('chatBatchRestore').onclick=async()=>{
   const records=hiddenChats().filter(row=>restoreSelection.has(row.id));
   if(records.length&&await updatePreferences('hide',records,false)){
     restoreSelection.clear();
-    await load($('chatQuery').value.trim());
+    applyRestoredChats(records);
   }
 };
 $('laterChat').onclick=()=>{
@@ -375,7 +388,7 @@ $('laterChatForm').onsubmit=async event=>{
   event.preventDefault();
   if(selected&&await deferChats([selected],$('laterReturnOn').value)){
     showLaterForm(false);
-    await load($('chatQuery').value.trim(),null,[]);
+    applyVisibility();
   }
 };
 $('chatBatchLaterForm').onsubmit=async event=>{
@@ -384,7 +397,7 @@ $('chatBatchLaterForm').onsubmit=async event=>{
   if(await deferChats(records,$('chatBatchReturnOn').value)){
     batch=false;
     showBatchLater(false);
-    await load($('chatQuery').value.trim(),null,[]);
+    applyVisibility();
   }
 };
 $('laterRestoreSelected').onclick=async()=>{
@@ -394,15 +407,13 @@ $('laterRestoreSelected').onclick=async()=>{
   try{await restoreLater(records);}
   catch(error){$('chatFilterStatus').textContent=error.message;return;}
   finally{syncing=false;controls();}
-  $('chatQuery').value='';
-  $('chatFilter').value='all';
-  await load('',null,records.map(record=>record.chat_id));
+  applyRestoredChats(records);
 };
 $('hideChat').onclick=async()=>{
   if(busy||syncing||!selected)return;
   if(selected.id.length>256){$('chatFilterStatus').textContent='このトークを非表示にできません。';return;}
   if(!confirm('「'+selected.title+'」を一覧から隠しますか？'))return;
-  if(await updatePreferences('hide',[selected],true))await load($('chatQuery').value.trim());
+  if(await updatePreferences('hide',[selected],true))applyVisibility();
 };
 $('pinChat').onclick=async()=>{
   if(busy||syncing||!selected)return;
