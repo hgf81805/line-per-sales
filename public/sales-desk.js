@@ -36,7 +36,7 @@ async function syncPreferences(changes=[]){
     return;
   }
   const oldPins=stored('pins',scope).filter(id=>typeof id==='string'&&id.length>0&&id.length<=256).slice(0,12);
-  const oldHidden=stored('hidden',scope).filter(row=>typeof row?.id==='string'&&row.id.length>0&&row.id.length<=256).slice(0,50);
+  const oldHidden=stored('hidden',scope).filter(row=>typeof row?.id==='string'&&row.id.length>0&&row.id.length<=256);
   const imported=[
     ...oldPins.map(chat_id=>({chat_id,kind:'pin',active:true,title:''})),
     ...oldHidden.map(({id,title})=>({chat_id:id,kind:'hide',active:true,title:String(title||'トーク').slice(0,200)}))
@@ -164,9 +164,24 @@ async function load(query=''){
   try{
     await syncPreferences();
     const ids=pins().slice(0,12);
-    const excluded=hiddenChats().slice(0,50).map(row=>row.id);
-    const response=await request('chats',{count:10,...(excluded.length?{excluded}:{}),...(query?{query}:{}),...(ids.length?{pins:ids}:{} )});
-    chats=response.chats;
+    const excluded=new Set(hiddenChats().map(row=>row.id));
+    const desired=query||ids.length?12:10;
+    const paged=excluded.size>50;
+    const visible=new Map(), seenCursors=new Set();
+    let cursor=null;
+    do{
+      const response=await request('chats',{
+        count:10,
+        ...(query?{query}:{}),
+        ...(!cursor&&ids.length?{pins:ids}:{}),
+        ...(paged?{paged:true,...(cursor?{cursor}:{})}:excluded.size?{excluded:[...excluded]}:{})
+      });
+      for(const chat of response.chats)if(!excluded.has(chat.id))visible.set(chat.id,chat);
+      cursor=paged?response.next_cursor:null;
+      if(cursor&&seenCursors.has(cursor))break;
+      if(cursor)seenCursors.add(cursor);
+    }while(cursor&&visible.size<desired);
+    chats=[...visible.values()].slice(0,desired);
     render();
     return true;
   }catch(error){$('chats').textContent=error.message;return false;}
@@ -182,8 +197,8 @@ $('chatBatchToggle').onclick=()=>{
 $('chatBatchHide').onclick=async()=>{
   const records=chats.filter(row=>hideSelection.has(row.id));
   if(!records.length)return;
-  if(hiddenChats().length+records.length>50||records.some(row=>row.id.length>256)){
-    $('chatFilterStatus').textContent='非表示にできるトークは最大50件です。選択内容を確認してください。';
+  if(records.some(row=>row.id.length>256)){
+    $('chatFilterStatus').textContent='選択したトークを非表示にできません。選択内容を確認してください。';
     return;
   }
   if(!confirm(records.length+'件のトークを一覧から隠しますか？'))return;
@@ -198,8 +213,7 @@ $('chatBatchRestore').onclick=async()=>{
 };
 $('hideChat').onclick=async()=>{
   if(busy||syncing||!selected)return;
-  const records=hiddenChats();
-  if(records.length>=50||selected.id.length>256){$('chatFilterStatus').textContent='このトークを非表示にできません。';return;}
+  if(selected.id.length>256){$('chatFilterStatus').textContent='このトークを非表示にできません。';return;}
   if(!confirm('「'+selected.title+'」を一覧から隠しますか？'))return;
   if(await updatePreferences('hide',[selected],true))await load($('chatQuery').value.trim());
 };
@@ -211,6 +225,8 @@ $('pinChat').onclick=async()=>{
 };
 window.salesDesk={
   hasChats:()=>chats.length>0,
+  chatIds:()=>chats.map(chat=>chat.id),
+  needsPagedList:()=>hiddenChats().length>50,
   showFollow(items){
     follow=new Map(items.map(row=>[row.chat_id,row.reasons]));
     followChecked=true;render();

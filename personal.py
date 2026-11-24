@@ -95,8 +95,9 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
             if self.headers.get('Host') != host:
                 return self.respond(403, {'error': '接続元を確認できません。127.0.0.1のURLを開いてください。'})
             assets = {'/cloud.js': ('text/javascript; charset=utf-8', 'cloud.js'), '/cloud-config.json': ('application/json; charset=utf-8', 'cloud-config.json'), '/send.js': ('text/javascript; charset=utf-8', 'send.js'), '/attio.js': ('text/javascript; charset=utf-8', 'attio.js'), '/pipeline.js': ('text/javascript; charset=utf-8', 'pipeline.js')}
-            for script in ('marked.umd.js','note-editor.js','sales-assist.js','sales-desk.js','settings.js','followups.js'):
+            for script in ('marked.umd.js','note-editor.js','sales-assist.js','sales-desk.js','settings.js','followups.js','push-settings.js','line-push-worker.js'):
                 assets['/'+script] = ('text/javascript; charset=utf-8', script)
+            assets['/manifest.webmanifest'] = ('application/manifest+json', 'manifest.webmanifest')
             assets['/ui.css'] = ('text/css; charset=utf-8', 'ui.css')
             assets['/directory.js'] = ('text/javascript; charset=utf-8', 'directory.js')
             assets.update({
@@ -171,7 +172,10 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
                         merge = 'ignore-duplicates' if data.get('import') is True else 'merge-duplicates'
                         cloud.http(root+'?on_conflict=user_id,kind,chat_id',rows,
                                    headers={'Prefer':'resolution='+merge+',missing=default,return=minimal'})
-                    rows = cloud.http(root+'?select=chat_id,kind,title&active=eq.true&order=kind,chat_id',
+                    offset = data.get('offset',0)
+                    if type(offset) is not int or offset < 0:
+                        raise ValueError('invalid offset')
+                    rows = cloud.http(root+'?select=chat_id,kind,title&active=eq.true&order=kind,chat_id&limit=100&offset='+str(offset),
                                       method='GET')
                     return self.respond(200, {'sync':True,'rows':rows or []})
                 if self.path == '/api/attio-note':
@@ -244,8 +248,13 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
                     expanded = bool(query.strip() or pins)
                     limit = max(12 if expanded else 5,count)
                     seen_exclusions = set(excluded)
+                    cursor = data.get('cursor')
+                    paged = data.get('paged') is True
+                    if cursor is not None and (not paged or not isinstance(cursor,str) or not cursor or len(cursor)>2048):
+                        raise ValueError('invalid cursor')
+                    continuation = cursor is not None
+                    next_cursor = None
                     found = []
-                    cursor = None
                     seen = set()
                     if not query.strip():
                         for pinned in pins:
@@ -260,7 +269,7 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
                     for _ in range(6 if count==10 else 3):
                         if len(found)>=limit:
                             break
-                        params = {'type': 'single', 'limit': limit}
+                        params = {'type': 'single', 'limit': limit-len(found) if paged else limit}
                         if query.strip():
                             params.update(query=query.strip(),scope='titles')
                         if cursor:
@@ -275,14 +284,19 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
                                 found.append({'id': c['id'], 'title': c.get('title') or '名称未設定', 'updated': c.get('lastActivity') or c.get('lastActivityAt') or c.get('updatedAt') or ''})
                             if len(found) == limit:
                                 break
-                        next_cursor = page.get('oldestCursor')
-                        if len(found) == limit or not page.get('hasMore') or not next_cursor or next_cursor == cursor:
+                        older = page.get('oldestCursor')
+                        next_cursor = older if page.get('hasMore') and older and older != cursor else None
+                        if len(found) == limit or next_cursor is None:
                             break
                         cursor = next_cursor
                     with lock:
-                        allowed.clear()
+                        if not continuation:
+                            allowed.clear()
                         allowed.update({c['id']: c for c in found})
-                    return self.respond(200, {'chats': found})
+                    result = {'chats': found}
+                    if paged:
+                        result['next_cursor'] = next_cursor
+                    return self.respond(200, result)
                 if self.path in ('/api/send','/api/send-status') and set(data) != {'ticket_id'}:
                     raise ValueError('送信確認の情報を確認してください。')
                 if self.path == '/api/send-status':
@@ -300,6 +314,11 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
                 if self.path == '/api/sales-assist' and data.get('mode') == 'today':
                     with lock:
                         chats = list(allowed.items())
+                    ids = data.get('chat_ids')
+                    if ids is not None:
+                        if not isinstance(ids,list) or len(ids)>12 or any(not isinstance(cid,str) for cid in ids):
+                            raise ValueError('invalid follow-up list')
+                        chats = [(cid, row) for cid,row in chats if cid in ids]
                     def assess(chat_id):
                         try:
                             chat = sender.chat(token, chat_id)

@@ -130,6 +130,7 @@ async function cloudJob(action,payload){
   if((action==='chats'&&(payload.query||payload.pins?.length)||action==='sales-assist'&&payload.mode==='overview')&&!device.capabilities?.includes('sales-desk-v1'))throw new Error('この機能にはMacアプリv2.1が必要です。');
   if(action==='chats'&&(payload.count||payload.excluded?.length)&&!device.capabilities?.includes('followups-v1'))throw new Error('10件表示と非表示設定にはMacアプリv2.2が必要です。');
   if(action==='sales-assist'&&['agenda','follow-plan','follow-save'].includes(payload.mode)&&!device.capabilities?.includes('followups-v1'))throw new Error('フォロー管理にはMacアプリv2.2が必要です。');
+  if(action==='chats'&&payload.paged&&!device.capabilities?.includes('paged-line-v1'))throw new Error('非表示の上限解除にはMacアプリv2.3が必要です。');
   const [job]=await raw('/rest/v1/line_remote_jobs',{user_id:session.user.id,device_id:activeDevice,action,payload},{headers:{Prefer:'return=representation'}});
   try{
     const deadline=Date.now()+245000;
@@ -155,16 +156,28 @@ request=async function(path,body){
   try{return await cloudJob(path,body);}catch(e){$('error').textContent=e.message;throw e;}
   finally{busy=false;controls();$('status').textContent='';}
 };
+window.linePushSignedIn=()=>Boolean(session&&config);
+window.linePushRequest=function(data){
+  if(!session||!config)throw new Error('先にこの端末でログインしてください。');
+  return raw('/functions/v1/line-push',data);
+};
 window.salesDeskScope=()=>local?'local':session&&activeDevice?session.user.id+':'+activeDevice:null;
 window.syncSalesDeskPreferences=async function(rows, importing=false){
-  if(local)return localRequest('chat-preferences',rows?{rows,import:importing}:{});
-  if(!session||!activeDevice||!config)return {sync:false,rows:[]};
+  if(!local&&(!session||!activeDevice||!config))return {sync:false,rows:[]};
   const root='/rest/v1/line_chat_preferences';
-  if(rows){
+  if(rows&&!local){
     const resolution=importing?'ignore-duplicates':'merge-duplicates';
     await raw(root+'?on_conflict=user_id,kind,chat_id',rows,{headers:{Prefer:'resolution='+resolution+',missing=default,return=minimal'}});
   }
-  return {sync:true,rows:await raw(root+'?select=chat_id,kind,title&active=eq.true&order=kind,chat_id',undefined,{method:'GET'})};
+  const preferences=[];
+  for(let offset=0;;offset+=100){
+    const result=local
+      ? await localRequest('chat-preferences',{offset,...(offset===0&&rows?{rows,import:importing}:{})})
+      : {sync:true,rows:await raw(root+'?select=chat_id,kind,title&active=eq.true&order=kind,chat_id&limit=100&offset='+offset,undefined,{method:'GET'})};
+    if(!result.sync)return result;
+    preferences.push(...result.rows);
+    if(result.rows.length<100)return {sync:true,rows:preferences};
+  }
 };
 let localStatus;
 if(panel){
@@ -193,7 +206,17 @@ $('cloudUse').onclick=()=>{
   notice('接続するMacを保存しました：'+device.name);
 };
 $('cloudRefresh').onclick=()=>loadDevices().catch(e=>notice(e.message));
-$('cloudLogout').onclick=async()=>{if(busy)return;try{await raw('/auth/v1/logout?scope=local');}catch(e){}finally{forgetSession();resetRemote();notice('ログアウトしました。');}};
+$('cloudLogout').onclick=async()=>{if(busy)return;try{
+if('serviceWorker' in navigator){
+  const registration=await navigator.serviceWorker.getRegistration();
+  const subscription=await registration?.pushManager.getSubscription();
+  if(subscription){
+    try{await window.linePushRequest({action:'remove',endpoint:subscription.endpoint});}
+    finally{await subscription.unsubscribe();}
+  }
+}
+}catch{}
+try{await raw('/auth/v1/logout?scope=local');}catch(e){}finally{forgetSession();resetRemote();notice('ログアウトしました。');}};
 localStatus=async function(){
   const response=await fetch('/api/cloud/status',{method:'POST',cache:'no-store',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},body:'{}'});
   const state=await response.json();if(!response.ok)throw new Error(state.error||'Macの接続状態を取得できません。');

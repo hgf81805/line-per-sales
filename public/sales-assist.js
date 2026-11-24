@@ -143,7 +143,7 @@ $('followRefresh').onclick=async()=>{
   list.replaceChildren(element('p','確認中…'));
   try{
     if(!window.salesDesk.hasChats()&&!(await $('loadChats').onclick()))throw new Error('先にLINE一覧を取得してください。');
-    const data=await request('sales-assist',{mode:'today'});
+    const data=await request('sales-assist',{mode:'today',...(window.salesDesk.needsPagedList()?{chat_ids:window.salesDesk.chatIds()}:{} )});
     window.salesDesk.showFollow(data.items);
     list.replaceChildren();
     for(const row of data.items){

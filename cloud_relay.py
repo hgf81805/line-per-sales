@@ -1,5 +1,7 @@
 """Outbound, authenticated relay. Beeper credentials never leave this Mac."""
 import json
+import hashlib
+from datetime import datetime, timedelta, timezone
 import platform
 import threading
 import time
@@ -27,10 +29,11 @@ class CloudRelay:
         self.dispatch = None
         self.worker = None
         self.heartbeat = None
+        self.push_worker = None
         self.status = {'enabled': False, 'connected': False, 'email': '', 'error': ''}
 
     def http(self, path, data=None, method='POST', auth=True, headers=None):
-        if not path.startswith(('/auth/v1/', '/rest/v1/')):
+        if not path.startswith(('/auth/v1/', '/rest/v1/')) and path!='/functions/v1/line-push':
             raise CloudError('許可されていないクラウド接続先です。')
         request_headers = {'apikey': CONFIG['key'], 'Content-Type': 'application/json', **(headers or {})}
         if auth:
@@ -96,6 +99,33 @@ class CloudRelay:
         self.worker = threading.Thread(target=self.run, daemon=True)
         self.heartbeat.start()
         self.worker.start()
+        self.push_worker=threading.Thread(target=self.push_notifications,daemon=True)
+        self.push_worker.start()
+
+    def push_notifications(self):
+        endpoint='/functions/v1/line-push'
+        while not self.stop_event.wait(15):
+            try:
+                if self.status['connected'] and self.dispatch and self.http(endpoint,{'action':'has'}).get('enabled'):
+                    offset, events = 0, set()
+                    while offset is not None and not self.stop_event.is_set():
+                        page=self.dispatch('sales-assist',{'mode':'agenda','offset':offset})
+                        for row in page['items']:
+                            if row['kind'] in ('today','overdue','reply') and row.get('task'):
+                                events.add((row['task']['id'],row['kind'],row['reply']))
+                        next_offset=page['next_offset']
+                        if next_offset is not None and next_offset<=offset:
+                            break
+                        offset=next_offset
+                    if events and not self.stop_event.is_set():
+                        day=datetime.now(timezone(timedelta(hours=9))).date().isoformat()
+                        digest=hashlib.sha256(json.dumps([day,sorted(events)]).encode()).hexdigest()
+                        self.http(endpoint,{'action':'publish','event_id':digest})
+            except Exception:
+                # Notification failures must not interrupt LINE or CRM operations.
+                pass
+            if self.stop_event.wait(285):
+                return
 
     def get_status(self):
         with self.lock:
@@ -133,7 +163,7 @@ class CloudRelay:
             user_id = self.credentials['user_id']
         result = self.http('/rest/v1/line_remote_devices?on_conflict=id', {
             'id': device_id, 'user_id': user_id, 'name': platform.node()[:100] or 'Mac',
-            'capabilities': ['read', 'confirmed-send-v1', 'attio-crm-v1', 'attio-directory-v1', 'attio-contact-v1', 'attio-note-edit-v1', 'sales-assist-v1', 'sales-desk-v1', 'followups-v1'],
+            'capabilities': ['read', 'confirmed-send-v1', 'attio-crm-v1', 'attio-directory-v1', 'attio-contact-v1', 'attio-note-edit-v1', 'sales-assist-v1', 'sales-desk-v1', 'followups-v1', 'paged-line-v1'],
             'last_seen': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), 'enabled': True,
         }, headers={'Prefer': 'resolution=merge-duplicates,return=minimal'})
         with self.lock:
@@ -156,7 +186,7 @@ class CloudRelay:
         if action not in ('chats', 'conversation', 'suggest', 'prepare-send', 'send', 'send-status', 'attio-list', 'attio-linked', 'attio-link', 'attio-unlink', 'attio-create', 'attio-stage', 'attio-task', 'attio-complete','attio-contact','attio-note','sales-assist') or not isinstance(payload, dict):
             raise CloudError('この操作には対応していません。')
         # Do not forward arbitrary URL paths, headers, Beeper tokens or unknown arguments.
-        permitted = {'chats': {'query','pins','excluded','count'}, 'conversation': {'chat_id'}, 'suggest': {'chat_id', 'message_id'}, 'prepare-send': {'chat_id','text','conversation_version'}, 'send': {'ticket_id'}, 'send-status': {'ticket_id'}, 'attio-list': {'offset','source'}, 'attio-linked': {'chat_id'}, 'attio-link': {'chat_id','deal_id'}, 'attio-unlink': {'chat_id'}, 'attio-create': {'name','owner_id','stage_id','operation_id','confirmed'}, 'attio-stage': {'deal_id','stage_id','expected_stage_id','operation_id','confirmed'}, 'attio-task': {'deal_id','owner_id','content','deadline','operation_id','confirmed'}, 'attio-complete': {'deal_id','task_id','operation_id','confirmed'}, 'attio-contact': {'chat_id','mode','query','name','person_id','confirmed'}, 'attio-note': {'note_id','person_id','body','title','revision'}, 'sales-assist': {'chat_id','mode','style','draft','offset','ticket_id','days','deal_id','owner_id','content','confirmed'}}[action]
+        permitted = {'chats': {'query','pins','excluded','count','paged','cursor'}, 'conversation': {'chat_id'}, 'suggest': {'chat_id', 'message_id'}, 'prepare-send': {'chat_id','text','conversation_version'}, 'send': {'ticket_id'}, 'send-status': {'ticket_id'}, 'attio-list': {'offset','source'}, 'attio-linked': {'chat_id'}, 'attio-link': {'chat_id','deal_id'}, 'attio-unlink': {'chat_id'}, 'attio-create': {'name','owner_id','stage_id','operation_id','confirmed'}, 'attio-stage': {'deal_id','stage_id','expected_stage_id','operation_id','confirmed'}, 'attio-task': {'deal_id','owner_id','content','deadline','operation_id','confirmed'}, 'attio-complete': {'deal_id','task_id','operation_id','confirmed'}, 'attio-contact': {'chat_id','mode','query','name','person_id','confirmed'}, 'attio-note': {'note_id','person_id','body','title','revision'}, 'sales-assist': {'chat_id','chat_ids','mode','style','draft','offset','ticket_id','days','deal_id','owner_id','content','confirmed'}}[action]
         if set(payload) - permitted or (action in ('prepare-send','send','send-status') and set(payload) != permitted):
             raise CloudError('操作の入力が不正です。')
         if self.stop_event.is_set() or not self.dispatch:
@@ -190,7 +220,7 @@ class CloudRelay:
     def disconnect(self):
         self.stop_event.set()
         # A request already sent can finish, but its result will never be published after disconnect.
-        for worker in (self.heartbeat, self.worker):
+        for worker in (self.heartbeat, self.worker, self.push_worker):
             if worker:
                 worker.join(timeout=1)
         with self.lock:
