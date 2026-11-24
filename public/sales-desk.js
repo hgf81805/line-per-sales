@@ -1,6 +1,8 @@
 (() => {
 'use strict';
 const baseControls=controls;
+const DISPLAY_LIMIT=15, RESERVE_LIMIT=5;
+const LIST_LIMIT=DISPLAY_LIMIT+RESERVE_LIMIT;
 let chats=[], follow=new Map(), followChecked=false, lastChat=null, pinScope=null;
 const make=(tag,text)=>{const node=document.createElement(tag);node.textContent=text;return node;};
 let synchronized=null, syncing=false, batch=false;
@@ -74,7 +76,7 @@ function renderLater(){
     row.className='desk-option';
     const label=make('span',record.title||'トーク');
     label.append(make('small',record.return_on?'戻す日 '+record.return_on:'新着が来たら戻す'));
-    const open=make('button','戻して開く');
+    const open=make('button','一覧に戻す');
     open.type='button';
     open.disabled=busy||syncing;
     open.onclick=async()=>{
@@ -83,8 +85,7 @@ function renderLater(){
       try{await restoreLater([record]);}
       catch(error){$('chatFilterStatus').textContent=error.message;return;}
       finally{syncing=false;controls();}
-      const restored=applyRestoredChats([record]);
-      if(restored.length)choose(restored[0]);
+      applyRestoredChats([record]);
     };
     row.append(checkbox({id:record.chat_id,title:record.title||'トーク'},laterSelection),label,open);
     items.append(row);
@@ -200,6 +201,10 @@ function isVisible(chat,marked){
 }
 function choose(chat){
   if(busy||!chats.includes(chat))return;
+  if(chat.needsRefresh){
+    $('chatFilterStatus').textContent='会話を開くには「LINE一覧を手動更新」を押してください。';
+    return;
+  }
   selected=chat;messageId=null;conversationVersion=null;
   $('name').textContent=chat.title;
   $('history').replaceChildren();$('candidates').replaceChildren();
@@ -213,7 +218,7 @@ function render(){
     return reasons.includes('期限超過')?3:reasons.includes('今日が期限')?2:reasons.includes('こちらの返信待ち')?1:0;
   }
   const visible=chats.filter(chat=>isVisible(chat,marked)).sort((a,b)=>
-    Number(marked.includes(b.id))-Number(marked.includes(a.id))||priority(b)-priority(a));
+    Number(marked.includes(b.id))-Number(marked.includes(a.id))||priority(b)-priority(a)).slice(0,DISPLAY_LIMIT);
   const fragment=document.createDocumentFragment();
   for(const chat of visible){
     const item=make('button',(marked.includes(chat.id)?'★ ':'')+chat.title);
@@ -221,7 +226,7 @@ function render(){
     item.classList.toggle('selected',selected?.id===chat.id);
     item.dataset.chatId=chat.id;
     const reasons=follow.get(chat.id)||[];
-    item.append(make('span',reasons.length?reasons.join(' ／ '):chat.updated?date(chat.updated):marked.includes(chat.id)?'ピン留め':'更新日時を取得できません'));
+    item.append(make('span',reasons.length?reasons.join(' ／ '):chat.needsRefresh?'手動更新後に開けます':chat.updated?date(chat.updated):marked.includes(chat.id)?'ピン留め':'更新日時を取得できません'));
     item.disabled=busy;
     item.onclick=()=>choose(chat);
     if(batch){
@@ -247,7 +252,7 @@ function applyVisibility(){
     $('history').replaceChildren();$('candidates').replaceChildren();
     $('name').textContent='相手を選んでください';
   }
-  chats=chats.filter(chat=>!excluded.has(chat.id)).slice(0,15);
+  chats=chats.filter(chat=>!excluded.has(chat.id)).slice(0,LIST_LIMIT);
   hideSelection.clear();
   render();controls();
   return excluded;
@@ -258,12 +263,11 @@ function applyRestoredChats(records){
   const existing=new Map(chats.map(chat=>[chat.id,chat]));
   const restored=records.map(record=>{
     const id=record.chat_id||record.id;
-    return existing.get(id)||{id,title:record.title||'トーク'};
+    return existing.get(id)||{id,title:record.title||'トーク',needsRefresh:true};
   });
   const incoming=new Set(restored.map(chat=>chat.id));
   chats=[...restored,...chats.filter(chat=>!incoming.has(chat.id))];
   applyVisibility();
-  return restored.filter(chat=>chats.includes(chat));
 }
 async function load(query='', openChat=null, releasedIds=null){
   if(busy||syncing)return false;
@@ -275,15 +279,14 @@ async function load(query='', openChat=null, releasedIds=null){
   hideSelection.clear();
   try{
     await syncPreferences();
-    const ids=[...new Set([...(openChat?[openChat]:[]),...(releasedIds||[]),...pins()])].slice(0,12);
+    const ids=[...new Set([...(openChat?[openChat]:[]),...(releasedIds||[]),...pins(),...chats.filter(chat=>chat.needsRefresh).map(chat=>chat.id)])].slice(0,12);
     const excluded=applyVisibility();
-    const desired=15;
     const excludedPayload=excluded.size<=50?[...excluded]:[];
     const visible=new Map(), seenCursors=new Set();
     let cursor=null;
     do{
       const response=await request('chats',{
-        count:desired, paged:true,
+        count:DISPLAY_LIMIT, paged:true,
         ...(query?{query}:{}),
         ...(!cursor&&ids.length?{pins:ids}:{}),
         ...(cursor?{cursor}:{}),
@@ -292,15 +295,15 @@ async function load(query='', openChat=null, releasedIds=null){
       if(scope!==window.salesDeskScope?.())return false;
       for(const chat of response.chats)if(!excluded.has(chat.id))visible.set(chat.id,chat);
       if(!hadList&&visible.size>chats.length){
-        chats=[...visible.values()].slice(0,desired);
+        chats=[...visible.values()].slice(0,LIST_LIMIT);
         render();
-        status.textContent=chats.length+'件表示・取得中…';
+        status.textContent='取得中…';
       }
       cursor=response.next_cursor;
       if(cursor&&seenCursors.has(cursor))break;
       if(cursor)seenCursors.add(cursor);
-    }while(cursor&&visible.size<desired);
-    chats=[...visible.values()].slice(0,desired);
+    }while(cursor&&visible.size<LIST_LIMIT);
+    chats=[...visible.values()].slice(0,LIST_LIMIT);
     render();
     const found=openChat&&chats.find(row=>row.id===openChat);
     if(found&&found.id!==selected?.id)choose(found);
@@ -423,7 +426,7 @@ $('pinChat').onclick=async()=>{
 };
 window.salesDesk={
   hasChats:()=>chats.length>0,
-  chatIds:()=>chats.map(chat=>chat.id),
+  chatIds:()=>chats.filter(chat=>!chat.needsRefresh).map(chat=>chat.id),
   showFollow(items){
     follow=new Map(items.map(row=>[row.chat_id,row.reasons]));
     followChecked=true;render();
