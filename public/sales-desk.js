@@ -3,7 +3,8 @@
 const baseControls=controls;
 let chats=[], follow=new Map(), followChecked=false, lastChat=null, pinScope=null;
 const make=(tag,text)=>{const node=document.createElement(tag);node.textContent=text;return node;};
-let synchronized=null, syncing=false;
+let synchronized=null, syncing=false, batch=false;
+const hideSelection=new Set(), restoreSelection=new Set();
 function stored(type,scope=window.salesDeskScope?.()){
   if(!scope)return [];
   try{
@@ -17,19 +18,19 @@ function pins(){
 function hiddenChats(){
   return synchronized ? synchronized.filter(row=>row.kind==='hide').map(row=>({id:row.chat_id,title:row.title})) : stored('hidden');
 }
-async function syncPreferences(change){
+async function syncPreferences(changes=[]){
   const scope=window.salesDeskScope?.();
   if(!scope)return;
   if(scope!==pinScope){pinScope=scope;synchronized=null;}
   let result=await window.syncSalesDeskPreferences();
   if(scope!==window.salesDeskScope?.())throw new Error('接続が変わりました。');
   if(!result.sync){
-    if(change){
-      const key=change.kind==='pin'?'pins':'hidden';
-      const existing=stored(key,scope);
-      const isPin=change.kind==='pin';
-      const kept=existing.filter(row=>(isPin?row:row.id)!==change.chat_id);
-      if(change.active)kept.push(isPin?change.chat_id:{id:change.chat_id,title:change.title});
+    if(changes.length){
+      const isPin=changes[0].kind==='pin';
+      const key=isPin?'pins':'hidden';
+      const ids=new Set(changes.map(row=>row.chat_id));
+      const kept=stored(key,scope).filter(row=>!ids.has(isPin?row:row.id));
+      for(const change of changes)if(change.active)kept.push(isPin?change.chat_id:{id:change.chat_id,title:change.title});
       localStorage.setItem('line-sales-'+key+':'+scope,JSON.stringify(kept));
     }
     return;
@@ -50,34 +51,61 @@ async function syncPreferences(change){
     localStorage.removeItem('line-sales-hidden:'+scope);
   }
   if(scope!==window.salesDeskScope?.())throw new Error('接続が変わりました。');
-  if(change)result=await window.syncSalesDeskPreferences([change]);
+  for(let i=0;i<changes.length;i+=8){
+    if(scope!==window.salesDeskScope?.())throw new Error('接続が変わりました。');
+    result=await window.syncSalesDeskPreferences(changes.slice(i,i+8));
+    synchronized=result.rows;
+  }
   if(scope===window.salesDeskScope?.())synchronized=result.rows;
 }
-async function updatePreference(kind, record, active){
+async function updatePreferences(kind, records, active){
   if(busy||syncing)return false;
   syncing=true;controls();
   try{
-    await syncPreferences({kind,chat_id:record.id,active,title:kind==='hide'?record.title.slice(0,200):''});
+    await syncPreferences(records.map(record=>({kind,chat_id:record.id,active,title:kind==='hide'&&active?record.title.slice(0,200):''})));
     return true;
   }catch(error){
     $('chatFilterStatus').textContent='設定を同期できませんでした。 '+error.message;
     return false;
   }finally{syncing=false;controls();}
 }
+function updateBatchControls(){
+  $('chatBatchBar').classList.toggle('hidden',!batch);
+  $('chatBatchToggle').setAttribute('aria-pressed',String(batch));
+  $('chatBatchToggle').textContent=batch?'選択を終了':'複数選択';
+  $('chatBatchCount').textContent=hideSelection.size+'件選択';
+  $('chatRestoreCount').textContent=restoreSelection.size+'件選択';
+  $('chatBatchToggle').disabled=busy||syncing;
+  $('chatBatchHide').disabled=busy||syncing||!hideSelection.size;
+  $('chatBatchRestore').disabled=busy||syncing||!restoreSelection.size;
+}
+function checkbox(record,selection){
+  const check=document.createElement('input');
+  check.type='checkbox';
+  check.checked=selection.has(record.id);
+  check.disabled=busy||syncing;
+  check.setAttribute('aria-label',record.title+'を選択');
+  check.onchange=()=>{
+    if(check.checked)selection.add(record.id);else selection.delete(record.id);
+    updateBatchControls();
+  };
+  return check;
+}
 function renderHidden(){
   const records=hiddenChats();
   const area=$('hiddenChatItems');
+  const available=new Set(records.map(row=>row.id));
+  for(const id of restoreSelection)if(!available.has(id))restoreSelection.delete(id);
   area.replaceChildren();
   $('hiddenChatSettings').hidden=!records.length;
+  $('hiddenChatSummary').textContent='非表示にしたトーク（'+records.length+'件）';
   for(const record of records){
-    const restore=make('button',record.title+' を戻す');
-    restore.type='button';
-    restore.disabled=busy||syncing;
-    restore.onclick=async()=>{
-      if(await updatePreference('hide',record,false))await load($('chatQuery').value.trim());
-    };
-    area.append(restore);
+    const label=make('label','');
+    label.className='desk-option';
+    label.append(checkbox(record,restoreSelection),make('span',record.title));
+    area.append(label);
   }
+  updateBatchControls();
 }
 function isVisible(chat,marked){
   const filter=$('chatFilter').value;
@@ -110,10 +138,19 @@ function render(){
     item.dataset.chatId=chat.id;
     const reasons=follow.get(chat.id)||[];
     item.append(make('span',reasons.length?reasons.join(' ／ '):chat.updated?date(chat.updated):marked.includes(chat.id)?'ピン留め':'更新日時を取得できません'));
-    item.disabled=busy;item.onclick=()=>choose(chat);
-    fragment.append(item);
+    item.disabled=busy||syncing;
+    item.onclick=()=>choose(chat);
+    if(batch){
+      const row=make('label','');
+      row.className='desk-option';
+      const name=make('span',(marked.includes(chat.id)?'★ ':'')+chat.title);
+      row.append(checkbox(chat,hideSelection),name);
+      if(reasons.length)name.append(make('small',reasons.join(' ／ ')));
+      fragment.append(row);
+    }else fragment.append(item);
   }
   $('chats').replaceChildren(fragment);
+  updateBatchControls();
   if(!visible.length)$('chats').textContent=chats.length?'該当するトークはありません。':'トークがありません。';
   $('chatFilterStatus').textContent=['reply','due'].includes($('chatFilter').value)&&!followChecked?'「最近のトークを確認」で対応状況を取得してください。':'';
 }
@@ -121,7 +158,7 @@ async function load(query=''){
   if(busy||syncing)return false;
   syncing=true;controls();
   selected=null;messageId=null;conversationVersion=null;
-  chats=[];follow.clear();followChecked=false;
+  chats=[];follow.clear();followChecked=false;hideSelection.clear();
   $('followResults').replaceChildren();$('history').replaceChildren();$('candidates').replaceChildren();
   $('name').textContent='相手を選んでください';$('chats').textContent='取得中…';
   try{
@@ -137,19 +174,40 @@ async function load(query=''){
 }
 $('loadChats').onclick=()=>{$('chatQuery').value='';return load();};
 $('chatSearchForm').onsubmit=event=>{event.preventDefault();load($('chatQuery').value.trim());};
-$('chatFilter').onchange=render;
+$('chatFilter').onchange=()=>{hideSelection.clear();render();};
+$('chatBatchToggle').onclick=()=>{
+  if(busy||syncing)return;
+  batch=!batch;hideSelection.clear();render();
+};
+$('chatBatchHide').onclick=async()=>{
+  const records=chats.filter(row=>hideSelection.has(row.id));
+  if(!records.length)return;
+  if(hiddenChats().length+records.length>50||records.some(row=>row.id.length>256)){
+    $('chatFilterStatus').textContent='非表示にできるトークは最大50件です。選択内容を確認してください。';
+    return;
+  }
+  if(!confirm(records.length+'件のトークを一覧から隠しますか？'))return;
+  if(await updatePreferences('hide',records,true)){batch=false;await load($('chatQuery').value.trim());}
+};
+$('chatBatchRestore').onclick=async()=>{
+  const records=hiddenChats().filter(row=>restoreSelection.has(row.id));
+  if(records.length&&await updatePreferences('hide',records,false)){
+    restoreSelection.clear();
+    await load($('chatQuery').value.trim());
+  }
+};
 $('hideChat').onclick=async()=>{
   if(busy||syncing||!selected)return;
   const records=hiddenChats();
   if(records.length>=50||selected.id.length>256){$('chatFilterStatus').textContent='このトークを非表示にできません。';return;}
   if(!confirm('「'+selected.title+'」を一覧から隠しますか？'))return;
-  if(await updatePreference('hide',selected,true))await load($('chatQuery').value.trim());
+  if(await updatePreferences('hide',[selected],true))await load($('chatQuery').value.trim());
 };
 $('pinChat').onclick=async()=>{
   if(busy||syncing||!selected)return;
   const ids=pins(),exists=ids.includes(selected.id);
   if(selected.id.length>256||(!exists&&ids.length>=12)){$('chatFilterStatus').textContent='このトークをピン留めできません。上限は12件です。';return;}
-  if(await updatePreference('pin',selected,!exists)){render();controls();}
+  if(await updatePreferences('pin',[selected],!exists)){render();controls();}
 };
 window.salesDesk={
   hasChats:()=>chats.length>0,
@@ -177,7 +235,7 @@ window.salesDesk={
 controls=function(){
   baseControls();
   const scope=window.salesDeskScope?.();
-  if(pinScope!==scope){synchronized=null;if(chats.length){chats=[];follow.clear();followChecked=false;render();}}
+  if(pinScope!==scope){synchronized=null;batch=false;hideSelection.clear();restoreSelection.clear();if(chats.length){chats=[];follow.clear();followChecked=false;render();}}
   pinScope=scope;
   if(lastChat!==selected?.id){
     lastChat=selected?.id;
@@ -190,6 +248,7 @@ controls=function(){
   $('loadChats').disabled||=syncing;
   $('pinChat').disabled=busy||syncing||!selected;
   $('hideChat').disabled=busy||syncing||!selected;
+  $('chats').querySelectorAll('input[type=checkbox]').forEach(check=>check.disabled=busy||syncing);
   renderHidden();
   $('pinChat').textContent=pins().includes(selected?.id)?'ピン留め解除':'ピン留め';
   $('chatQuery').disabled=busy;

@@ -70,3 +70,17 @@ button.primary { background: var(--accent); }
 #salesAssist summary,#overviewNotes summary{cursor:pointer}
 
 #postSendFollowup[hidden], #postFollowForm[hidden] { display: none !important; }
+
+.desk-tools{padding:.8rem;background:#eef5f3;border-radius:12px;display:grid;gap:.75rem}
+.desk-tools .chat-search{display:grid;gap:.35rem;margin:0}
+.desk-label,.desk-filter-row label{font-size:.85rem;font-weight:650}
+.desk-search-row,.desk-filter-row,.desk-batch{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
+.desk-search-row input,.desk-filter-row select{flex:1;min-width:0;border:1px solid #b7cbc5;border-radius:8px;padding:.55rem;font:inherit;background:#fff}
+.desk-option{display:flex;align-items:center;gap:.65rem;border:1px solid #dce7e3;border-radius:10px;padding:.6rem .75rem;margin:.4rem 0;background:white;color:#173c32;cursor:pointer}
+.desk-option input{width:1.2rem;height:1.2rem;flex:none;accent-color:#136957}
+.desk-option small{display:block;color:#436559;margin-top:.2rem}
+.desk-option:has(input:checked){background:#e7f4ee;border-color:#91bbaa}
+.desk-batch{justify-content:space-between;margin:.6rem 0}
+.desk-hidden{margin-top:1.1rem;padding-top:.85rem;border-top:1px solid #dce7e3}
+.desk-hidden summary{cursor:pointer;font-weight:650}
+.desk-hidden[hidden]{display:none!important}
