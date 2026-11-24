@@ -86,15 +86,31 @@ window.savedAttioDirectory = {
 async function loggedIn(){
   if(panel){$('cloudLogin').classList.add('hidden');$('cloudLoggedIn').classList.remove('hidden');$('cloudEmailLabel').textContent=session.user.email;}
   window.dispatchEvent(new Event('attiosessionready'));
-  if(panel||rememberedDevice())await loadDevices();
-  const saved=devices.find(device=>device.id===rememberedDevice()&&device.enabled);
+  if(!panel&&bridgeToken)return;
+  await loadDevices();
+  const remembered=rememberedDevice();
+  const enabled=devices.filter(device=>device.enabled);
+  // Restore an explicit choice. With exactly one online Mac, no choice is needed.
+  const saved=remembered ? enabled.find(device=>device.id===remembered) :
+    !panel&&enabled.length===1&&Date.now()-new Date(enabled[0].last_seen).getTime()<60000?enabled[0]:null;
   if(saved&&!panel){
+    rememberDevice(saved.id);
     activeDevice=saved.id;cloudActive=true;showConnected();controls();
     const badge=document.querySelector('#connected .badge');
     if(badge)badge.textContent=Date.now()-new Date(saved.last_seen).getTime()<60000?'クラウド経由 · 確認して送信':'接続先のMacがオフラインです';
     window.dispatchEvent(new Event('connectionchange'));
   }
-  if(!panel)return;
+  if(!panel){
+    const hint=$('connectionHint');
+    if(hint){
+      if(remembered==='off')hint.textContent='設定で接続するMacを選び直してください。';
+      else if(remembered)hint.textContent='以前選んだMacが見つかりません。設定で接続先を確認してください。';
+      else if(enabled.length>1)hint.textContent='複数のMacが登録されています。設定で使うMacを選んで保存してください。';
+      else if(enabled.length===1)hint.textContent='登録済みのMacがオフラインです。Mac・Beeper・接続アプリを起動してから再読み込みしてください。';
+      else hint.textContent='このログインに登録されたMacが見つかりません。Mac内の設定で同じアカウントを使って登録してください。';
+    }
+    return;
+  }
   if(saved)notice('接続するMac：'+saved.name);
   if(deviceTimer)clearInterval(deviceTimer);
   deviceTimer=setInterval(()=>loadDevices().catch(e=>notice(e.message)),15000);
@@ -131,7 +147,7 @@ async function cloudJob(action,payload){
 }
 request=async function(path,body){
   if(local||!cloudActive)return localRequest(path,body);
-  if(path==='disconnect'){generation++;cloudActive=false;rememberDevice(null);return {ok:true};}
+  if(path==='disconnect'){generation++;cloudActive=false;rememberDevice('off');return {ok:true};}
   busy=true;controls();$('error').textContent='';$('status').textContent='Macで処理しています…';
   try{return await cloudJob(path,body);}catch(e){$('error').textContent=e.message;throw e;}
   finally{busy=false;controls();$('status').textContent='';}
