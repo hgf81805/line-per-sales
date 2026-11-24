@@ -84,3 +84,15 @@ button.primary { background: var(--accent); }
 .desk-hidden{margin-top:1.1rem;padding-top:.85rem;border-top:1px solid #dce7e3}
 .desk-hidden summary{cursor:pointer;font-weight:650}
 .desk-hidden[hidden]{display:none!important}
+
+/* Compact controls, while retaining a usable touch target. */
+button, a.button {
+  padding: 7px 12px;
+  font-size: .9rem;
+  line-height: 1.35;
+  min-height: 34px;
+}
+a.button { display: inline-flex; align-items: center; }
+@media (pointer: coarse), (max-width: 600px) {
+  button, a.button { min-height: 42px; }
+}
