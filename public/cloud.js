@@ -156,6 +156,16 @@ request=async function(path,body){
   finally{busy=false;controls();$('status').textContent='';}
 };
 window.salesDeskScope=()=>local?'local':session&&activeDevice?session.user.id+':'+activeDevice:null;
+window.syncSalesDeskPreferences=async function(rows, importing=false){
+  if(local)return localRequest('chat-preferences',rows?{rows,import:importing}:{});
+  if(!session||!activeDevice||!config)return {sync:false,rows:[]};
+  const root='/rest/v1/line_chat_preferences';
+  if(rows){
+    const resolution=importing?'ignore-duplicates':'merge-duplicates';
+    await raw(root+'?on_conflict=user_id,kind,chat_id',rows,{headers:{Prefer:'resolution='+resolution+',missing=default,return=minimal'}});
+  }
+  return {sync:true,rows:await raw(root+'?select=chat_id,kind,title&active=eq.true&order=kind,chat_id',undefined,{method:'GET'})};
+};
 let localStatus;
 if(panel){
 $('cloudLogin').onsubmit=async event=>{

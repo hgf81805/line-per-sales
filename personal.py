@@ -134,7 +134,7 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
                 paired = is_public and bridge_token in sessions
             if self.headers.get('Host') != host or not (is_local or paired or (is_public and self.path == '/api/pair')):
                 return self.respond(403, {'error': 'このMacの画面で接続コードを発行し、公開サイトから接続し直してください。'})
-            routes = ('/api/attio/configure', '/api/attio/disconnect', '/api/attio/status', '/api/attio-list', '/api/attio-linked', '/api/attio-link', '/api/attio-unlink', '/api/attio-create', '/api/attio-stage', '/api/attio-task', '/api/attio-complete', '/api/attio-contact', '/api/attio-note', '/api/sales-assist', '/api/prepare-send', '/api/send', '/api/send-status', '/api/chats', '/api/conversation', '/api/suggest', '/api/pair', '/api/pair-code', '/api/disconnect', '/api/cloud/status', '/api/cloud/enroll', '/api/cloud/disconnect')
+            routes = ('/api/attio/configure', '/api/attio/disconnect', '/api/attio/status', '/api/attio-list', '/api/attio-linked', '/api/attio-link', '/api/attio-unlink', '/api/attio-create', '/api/attio-stage', '/api/attio-task', '/api/attio-complete', '/api/attio-contact', '/api/attio-note', '/api/sales-assist', '/api/chat-preferences', '/api/prepare-send', '/api/send', '/api/send-status', '/api/chats', '/api/conversation', '/api/suggest', '/api/pair', '/api/pair-code', '/api/disconnect', '/api/cloud/status', '/api/cloud/enroll', '/api/cloud/disconnect')
             if self.path not in routes:
                 return self.respond(404, {'error': 'この操作には対応していません。'})
             if (self.path == '/api/pair-code' or self.path.startswith('/api/cloud/') or self.path.startswith('/api/attio/')) and not is_local:
@@ -152,6 +152,28 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
                     return self.respond(200, attio.status())
                 if self.path == '/api/attio/disconnect':
                     return self.respond(200, attio.disconnect())
+                if self.path == '/api/chat-preferences':
+                    if not is_local:
+                        return self.respond(403, {'error':'Mac内の画面から利用してください。'})
+                    if not cloud or not cloud.credentials:
+                        return self.respond(200, {'sync':False,'rows':[]})
+                    root = '/rest/v1/line_chat_preferences'
+                    if 'rows' in data:
+                        rows = data['rows']
+                        if not isinstance(rows,list) or not 1 <= len(rows) <= 62:
+                            raise ValueError('invalid preferences')
+                        for row in rows:
+                            if (not isinstance(row,dict) or set(row) != {'chat_id','kind','active','title'}
+                                or row['kind'] not in ('pin','hide') or type(row['active']) is not bool
+                                or not isinstance(row['chat_id'],str) or not 1 <= len(row['chat_id']) <= 256
+                                or not isinstance(row['title'],str) or len(row['title']) > 200):
+                                raise ValueError('invalid preference')
+                        merge = 'ignore-duplicates' if data.get('import') is True else 'merge-duplicates'
+                        cloud.http(root+'?on_conflict=user_id,kind,chat_id',rows,
+                                   headers={'Prefer':'resolution='+merge+',missing=default,return=minimal'})
+                    rows = cloud.http(root+'?select=chat_id,kind,title&active=eq.true&order=kind,chat_id',
+                                      method='GET')
+                    return self.respond(200, {'sync':True,'rows':rows or []})
                 if self.path == '/api/attio-note':
                     if 'note_id' not in data:
                         if not is_local or not cloud:
