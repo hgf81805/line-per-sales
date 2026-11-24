@@ -155,9 +155,10 @@ async function cloudJob(action,payload){
     if(session)raw('/rest/v1/line_remote_jobs?id=eq.'+encodeURIComponent(job.id),undefined,{method:'DELETE'}).catch(()=>{});
   }
 }
-request=async function(path,body){
-  if(local||!cloudActive)return localRequest(path,body);
+request=async function(path,body,quiet=false){
+  if(local||!cloudActive)return localRequest(path,body,quiet);
   if(path==='disconnect'){generation++;cloudActive=false;rememberDevice('off');return {ok:true};}
+  if(quiet)return cloudJob(path,body);
   busy=true;controls();$('error').textContent='';$('status').textContent='Macで処理しています…';
   try{return await cloudJob(path,body);}catch(e){$('error').textContent=e.message;throw e;}
   finally{busy=false;controls();$('status').textContent='';}

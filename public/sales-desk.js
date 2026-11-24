@@ -223,7 +223,7 @@ function render(){
     item.dataset.chatId=chat.id;
     const reasons=follow.get(chat.id)||[];
     item.append(make('span',reasons.length?reasons.join(' ／ '):chat.updated?date(chat.updated):marked.includes(chat.id)?'ピン留め':'更新日時を取得できません'));
-    item.disabled=busy||syncing;
+    item.disabled=busy;
     item.onclick=()=>choose(chat);
     if(batch){
       const row=make('label','');
@@ -245,14 +245,25 @@ async function load(query='', openChat=null, releasedIds=null){
   if(busy||syncing)return false;
   syncing=true;controls();
   const scope=window.salesDeskScope?.();
-  selected=null;messageId=null;conversationVersion=null;
-  chats=[];follow.clear();followChecked=false;hideSelection.clear();
-  $('history').replaceChildren();$('candidates').replaceChildren();
-  $('name').textContent='相手を選んでください';$('chats').textContent='取得中…';
+  const status=$('chatLoadStatus');
+  const hadList=chats.length>0;
+  status.textContent=hadList?'更新中…':'取得中…';
+  hideSelection.clear();
   try{
     await syncPreferences();
     const ids=[...new Set([...(openChat?[openChat]:[]),...(releasedIds||[]),...pins()])].slice(0,12);
     const excluded=new Set([...hiddenChats().map(row=>row.id),...laterChats().map(row=>row.chat_id)]);
+    if(selected&&excluded.has(selected.id)){
+      selected=null;messageId=null;conversationVersion=null;
+      $('history').replaceChildren();$('candidates').replaceChildren();
+      $('name').textContent='相手を選んでください';
+      controls();
+    }
+    const allowed=chats.filter(chat=>!excluded.has(chat.id));
+    if(allowed.length!==chats.length){
+      chats=allowed;
+      render();
+    }
     const desired=15;
     const excludedPayload=excluded.size<=50?[...excluded]:[];
     const visible=new Map(), seenCursors=new Set();
@@ -264,8 +275,14 @@ async function load(query='', openChat=null, releasedIds=null){
         ...(!cursor&&ids.length?{pins:ids}:{}),
         ...(cursor?{cursor}:{}),
         ...(excludedPayload.length?{excluded:excludedPayload}:{})
-      });
+      },true);
+      if(scope!==window.salesDeskScope?.())return false;
       for(const chat of response.chats)if(!excluded.has(chat.id))visible.set(chat.id,chat);
+      if(!hadList&&visible.size>chats.length){
+        chats=[...visible.values()].slice(0,desired);
+        render();
+        status.textContent=chats.length+'件表示・取得中…';
+      }
       cursor=response.next_cursor;
       if(cursor&&seenCursors.has(cursor))break;
       if(cursor)seenCursors.add(cursor);
@@ -273,10 +290,14 @@ async function load(query='', openChat=null, releasedIds=null){
     chats=[...visible.values()].slice(0,desired);
     render();
     const found=openChat&&chats.find(row=>row.id===openChat);
-    if(found)choose(found);
+    if(found&&found.id!==selected?.id)choose(found);
+    status.textContent='';
     if(releasedIds===null&&laterChats().length)void refreshDeferred(query,scope);
     return true;
-  }catch(error){$('chats').textContent=error.message;return false;}
+  }catch(error){
+    if(scope===window.salesDeskScope?.())status.textContent='一覧を更新できませんでした。 '+error.message;
+    return false;
+  }
   finally{syncing=false;controls();}
 }
 async function refreshDeferred(query,scope){
@@ -414,7 +435,7 @@ window.salesDesk={
 controls=function(){
   baseControls();
   const scope=window.salesDeskScope?.();
-  if(pinScope!==scope){synchronized=null;batch=false;hideSelection.clear();restoreSelection.clear();laterSelection.clear();if(chats.length){chats=[];follow.clear();followChecked=false;render();}}
+  if(pinScope!==scope){$('chatLoadStatus').textContent='';synchronized=null;batch=false;hideSelection.clear();restoreSelection.clear();laterSelection.clear();if(chats.length){chats=[];follow.clear();followChecked=false;render();}}
   pinScope=scope;
   if(lastChat!==selected?.id){
     lastChat=selected?.id;
