@@ -259,7 +259,7 @@ def make_handler(token, port, cloud=None, sender=None, attio=None, chat_index=No
                         for row in rows:
                             if (not isinstance(row,dict) or set(row)-{'chat_id','kind','active','title','deferred_at','return_on'}
                                 or not {'chat_id','kind','active','title'}<=set(row)
-                                or row['kind'] not in ('pin','hide','later') or type(row['active']) is not bool
+                                or row['kind'] not in ('pin','hide','later','lead') or type(row['active']) is not bool
                                 or not isinstance(row['chat_id'],str) or not 1 <= len(row['chat_id']) <= 256
                                 or not isinstance(row['title'],str) or len(row['title']) > 200):
                                 raise ValueError('invalid preference')
@@ -337,6 +337,15 @@ def make_handler(token, port, cloud=None, sender=None, attio=None, chat_index=No
                             sessions.pop(bridge_token, None)
                     return self.respond(200, {'ok': True})
                 if self.path == '/api/chats':
+                    if 'lead_chat' in data:
+                        chat_id = data['lead_chat']
+                        if set(data) != {'lead_chat'} or not isinstance(chat_id,str) or not 1<=len(chat_id)<=256:
+                            raise ValueError('invalid lead chat')
+                        current = sender.chat(token,chat_id)
+                        chat = {'id':chat_id, 'title':current['title'], 'updated':''}
+                        with lock:
+                            allowed[chat_id] = chat
+                        return self.respond(200, {'chats':[chat]})
                     query = data.get('query','')
                     pins = data.get('pins',[])
                     if not isinstance(query,str) or len(query)>120 or not isinstance(pins,list) or len(pins)>12:
@@ -354,7 +363,7 @@ def make_handler(token, port, cloud=None, sender=None, attio=None, chat_index=No
                         offset = 0
                         while True:
                             rows = cloud.http('/rest/v1/line_chat_preferences'
-                                              '?select=chat_id&active=eq.true&kind=in.(hide,later)'
+                                              '?select=chat_id&active=eq.true&kind=in.(hide,later,lead)'
                                               f'&order=kind,chat_id&limit=100&offset={offset}', method='GET') or []
                             seen_exclusions.update(row['chat_id'] for row in rows)
                             if len(rows) < 100:

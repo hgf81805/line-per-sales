@@ -23,6 +23,39 @@ function hiddenChats(){
 function laterChats(){
   return synchronized ? synchronized.filter(row=>row.kind==='later') : stored('later');
 }
+function leadChats(){
+  return synchronized ? synchronized.filter(row=>row.kind==='lead').map(row=>({id:row.chat_id,title:row.title})) : stored('lead');
+}
+function renderLeads(){
+  const records=leadChats();
+  $('leadChatSettings').hidden=!records.length;
+  $('leadChatSummary').textContent='優先リード（'+records.length+'件）';
+  const items=$('leadChatItems');
+  items.replaceChildren();
+  for(const record of records){
+    const row=make('div','');
+    row.className='desk-option';
+    const open=make('button',record.title||'トーク');
+    const restore=make('button','一覧に戻す');
+    open.type=restore.type='button';
+    open.disabled=restore.disabled=busy||syncing;
+    open.onclick=async()=>{
+      if(busy||syncing)return;
+      const scope=window.salesDeskScope?.();
+      try{
+        const result=await request('chats',{lead_chat:record.id});
+        if(scope!==window.salesDeskScope?.()||!leadChats().some(row=>row.id===record.id))return;
+        const chat=result.chats.find(item=>item.id===record.id);
+        if(chat)choose(chat,true);
+      }catch(error){$('chatFilterStatus').textContent=error.message;}
+    };
+    restore.onclick=async()=>{
+      if(await updatePreferences('lead',[record],false))applyRestoredChats([record]);
+    };
+    row.append(open,restore);
+    items.append(row);
+  }
+}
 function jstToday(){
   const fields=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Tokyo',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts();
   const value=Object.fromEntries(fields.map(field=>[field.type,field.value]));
@@ -105,7 +138,7 @@ async function syncPreferences(changes=[]){
     if(changes.length){
       const isPin=changes[0].kind==='pin';
       const isLater=changes[0].kind==='later';
-      const key=isPin?'pins':isLater?'later':'hidden';
+      const key=isPin?'pins':isLater?'later':changes[0].kind==='lead'?'lead':'hidden';
       const ids=new Set(changes.map(row=>row.chat_id));
       const kept=stored(key,scope).filter(row=>!ids.has(isPin?row:isLater?row.chat_id:row.id));
       for(const change of changes)if(change.active)kept.push(isPin?change.chat_id:isLater?change:{id:change.chat_id,title:change.title});
@@ -117,6 +150,7 @@ async function syncPreferences(changes=[]){
   const oldHidden=stored('hidden',scope).filter(row=>typeof row?.id==='string'&&row.id.length>0&&row.id.length<=256);
   const imported=[
     ...stored('later',scope),
+    ...stored('lead',scope).map(({id,title})=>({chat_id:id,title,kind:'lead',active:true})),
     ...oldPins.map(chat_id=>({chat_id,kind:'pin',active:true,title:''})),
     ...oldHidden.map(({id,title})=>({chat_id:id,kind:'hide',active:true,title:String(title||'トーク').slice(0,200)}))
   ];
@@ -129,6 +163,7 @@ async function syncPreferences(changes=[]){
     localStorage.removeItem('line-sales-pins:'+scope);
     localStorage.removeItem('line-sales-hidden:'+scope);
     localStorage.removeItem('line-sales-later:'+scope);
+    localStorage.removeItem('line-sales-lead:'+scope);
   }
   if(scope!==window.salesDeskScope?.())throw new Error('接続が変わりました。');
   for(let i=0;i<changes.length;i+=8){
@@ -142,7 +177,7 @@ async function updatePreferences(kind, records, active){
   if(busy||syncing)return false;
   syncing=true;controls();
   try{
-    await syncPreferences(records.map(record=>({kind,chat_id:record.id,active,title:kind==='hide'&&active?record.title.slice(0,200):''})));
+    await syncPreferences(records.map(record=>({kind,chat_id:record.id,active,title:(kind==='hide'||kind==='lead')&&active?record.title.slice(0,200):''})));
     return true;
   }catch(error){
     $('chatFilterStatus').textContent='設定を同期できませんでした。 '+error.message;
@@ -199,8 +234,8 @@ function isVisible(chat,marked){
     (filter==='reply'&&reasons.includes('こちらの返信待ち'))||
     (filter==='due'&&reasons.some(reason=>reason==='今日が期限'||reason==='期限超過'));
 }
-function choose(chat){
-  if(busy||!chats.includes(chat))return;
+function choose(chat,fromLead=false){
+  if(busy||(!fromLead&&!chats.includes(chat)))return;
   if(chat.needsRefresh){
     $('chatFilterStatus').textContent='会話を開くには「LINE一覧を手動更新」を押してください。';
     return;
@@ -246,7 +281,7 @@ function render(){
   $('chatFilterStatus').textContent=statusFilter&&!followChecked?'「対応状況を確認」を押してください。':'';
 }
 function applyVisibility(){
-  const excluded=new Set([...hiddenChats().map(row=>row.id),...laterChats().map(row=>row.chat_id)]);
+  const excluded=new Set([...hiddenChats().map(row=>row.id),...laterChats().map(row=>row.chat_id),...leadChats().map(row=>row.id)]);
   if(selected&&excluded.has(selected.id)){
     selected=null;messageId=null;conversationVersion=null;
     $('history').replaceChildren();$('candidates').replaceChildren();
@@ -417,6 +452,18 @@ $('laterRestoreSelected').onclick=async()=>{
   finally{syncing=false;controls();}
   applyRestoredChats(records);
 };
+$('leadChat').onclick=async()=>{
+  if(busy||syncing||!selected)return;
+  const record=selected;
+  if(record.id.length>256){
+    $('chatFilterStatus').textContent='このトークを優先リードに移せません。';
+    return;
+  }
+  if(await updatePreferences('lead',[record],true)){
+    applyVisibility();
+    $('leadChatSettings').open=true;
+  }
+};
 $('hideChat').onclick=async()=>{
   if(busy||syncing||!selected)return;
   if(selected.id.length>256){$('chatFilterStatus').textContent='このトークを非表示にできません。';return;}
@@ -469,8 +516,14 @@ controls=function(){
   $('loadChats').disabled||=syncing;
   $('pinChat').disabled=busy||syncing||!selected;
   $('hideChat').disabled=busy||syncing||!selected;
+  const isLead=leadChats().some(row=>row.id===selected?.id);
+  $('leadChat').hidden=isLead;
+  $('leadChat').disabled=busy||syncing||!selected;
+  $('hideChat').hidden=isLead;
+  $('laterChat').hidden=isLead;
   $('laterChat').disabled=busy||syncing||!selected;
   for(const field of $('laterChatForm').elements)field.disabled=busy||syncing;
+  renderLeads();
   renderLater();
   $('chats').querySelectorAll('input[type=checkbox]').forEach(check=>check.disabled=busy||syncing);
   renderHidden();
