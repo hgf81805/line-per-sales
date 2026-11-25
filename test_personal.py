@@ -1,6 +1,8 @@
 import json
 import re
 import threading
+import tempfile
+from pathlib import Path
 import unittest
 from http.server import ThreadingHTTPServer
 from unittest.mock import Mock, patch
@@ -129,7 +131,12 @@ class PersonalTest(unittest.TestCase):
                     {'id':'other','type':'group','network':'Discord'},
                     {'id':'c0','type':'single','network':'LINE'},
                 ]}
+            if url.endswith('/v1/chats/group'):
+                return {'id':'group','title':'営業チーム','type':'group','network':'LINE','accountID':'line-test'}
             if url.endswith('/group/messages'):
+                if kwargs.get('method')=='POST':
+                    self.assertEqual(kwargs['data'],{'text':'送信'})
+                    return {'chatID':'group','pendingMessageID':'test-pending'}
                 return {'items': [
                     {'id':'1','senderName':'佐藤','text':'金曜に商談します'},
                     {'id':'2','senderName':'本人','isSender':True,'text':'了解しました'},
@@ -140,8 +147,11 @@ class PersonalTest(unittest.TestCase):
                 return {'response':json.dumps({'decisions':'商談する','requests':'該当なし','schedule':'金曜'})}
             return self.upstream(url, **kwargs)
 
-        with patch.object(personal.reader,'http_json',side_effect=upstream):
-            self.assertEqual(self.api('conversation',{'group':True,'chat_id':'group'})[0],400)
+        with tempfile.TemporaryDirectory() as directory, patch.object(personal.reader,'http_json',side_effect=upstream) as beeper:
+            sender=personal.ConfirmedSender(Path(directory)/'test.sqlite3')
+            self.server.RequestHandlerClass=personal.make_handler('test-token',self.server.server_port,sender=sender)
+            with urlopen(self.url) as res:
+                self.csrf=re.search("csrf='([^']+)'",res.read().decode())[1]
             status, groups = self.api('chats',{'groups':True})
             self.assertEqual(status,200)
             self.assertEqual([row['id'] for row in groups['chats']],['group'])
@@ -152,6 +162,15 @@ class PersonalTest(unittest.TestCase):
             self.assertEqual(status,200)
             self.assertEqual(summary['summary']['schedule'],'金曜')
             self.assertEqual(self.api('prepare-send',{'chat_id':'group','text':'送信','conversation_version':'v'})[0],400)
+            status, review = self.api('prepare-send',{'chat_id':'group','group':True,'text':'送信',
+                                                     'conversation_version':history['conversation_version']})
+            self.assertEqual(status,200)
+            self.assertEqual(review['title'],'営業チーム')
+            self.assertEqual(review['text'],'送信')
+            for _ in range(2):
+                self.assertEqual(self.api('send',{'ticket_id':review['ticket_id']})[1]['status'],'accepted')
+            self.assertEqual(sum(call.kwargs.get('method')=='POST' and call.args[0].endswith('/group/messages')
+                                 for call in beeper.call_args_list),1)
 
     def test_history_and_local_generation(self):
         self.api('chats')

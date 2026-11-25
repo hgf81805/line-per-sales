@@ -130,6 +130,7 @@ async function cloudJob(action,payload){
   if((action==='chats'&&(payload.query||payload.pins?.length)||action==='sales-assist'&&payload.mode==='overview')&&!device.capabilities?.includes('sales-desk-v1'))throw new Error('この機能にはMacアプリv2.1が必要です。');
   if(action==='chats'&&(payload.count||payload.excluded?.length)&&!device.capabilities?.includes('followups-v1'))throw new Error('10件表示と非表示設定にはMacアプリv2.2が必要です。');
   if(action==='sales-assist'&&['agenda','follow-plan','follow-save'].includes(payload.mode)&&!device.capabilities?.includes('followups-v1'))throw new Error('フォロー管理にはMacアプリv2.2が必要です。');
+  if((action==='prepare-send'&&payload.group||action==='conversation'&&payload.reply_purpose||action==='chats'&&payload.groups&&payload.query)&&!device.capabilities?.includes('line-group-tools-v1'))throw new Error('グループの追加機能を使うにはMacアプリをv3.0へ更新してください。');
   if((action==='chats'&&payload.groups||action==='conversation'&&payload.group)&&!device.capabilities?.includes('line-groups-v1'))throw new Error('グループLINEを使うにはMacアプリをv2.9へ更新してください。');
   if(action==='chats'&&payload.lead_chat&&!device.capabilities?.includes('priority-leads-v1'))throw new Error('優先リードの会話を開くにはMacアプリをv2.8へ更新してください。');
   if(action==='chats'&&payload.saved_exclusions&&!device.capabilities?.includes('saved-chat-exclusions-v1')){

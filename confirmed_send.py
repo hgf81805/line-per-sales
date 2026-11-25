@@ -52,26 +52,26 @@ class ConfirmedSender:
             row = db.execute('select account,chat,accepted_at from accepted_targets where ticket=?',(ticket,)).fetchone()
         return row
 
-    def chat(self, token, cid):
+    def chat(self, token, cid, chat_type='single'):
         chat = reader.http_json(reader.BEEPER_URL + '/v1/chats/' + quote(cid, safe=''), token=token)
-        if (chat.get('id') != cid or chat.get('type') != 'single' or (chat.get('network') or '').lower() != 'line'
+        if (chat.get('id') != cid or chat.get('type') != chat_type or (chat.get('network') or '').lower() != 'line'
                 or chat.get('merge') or chat.get('mergedIntoChatID') or not chat.get('accountID')):
-            raise SendValidationError('LINEの1対1トークを選び直してください。')
+            raise SendValidationError('LINEのトークを選び直してください。' if chat_type=='group' else 'LINEの1対1トークを選び直してください。')
         return {'chat_id': cid, 'title': chat.get('title') or '名称未設定', 'account_id': chat['accountID']}
 
-    def prepare(self, token, cid, text, version):
+    def prepare(self, token, cid, text, version, chat_type='single'):
         if not isinstance(text, str) or not text.strip() or len(text) > 1000:
             raise SendValidationError('本文は1〜1000文字で入力してください。')
         if not isinstance(version, str) or conversation_version(reader.message_page(token, cid)) != version:
             raise SendValidationError('会話が更新されています。会話を読み込み直してから確認してください。')
-        target = self.chat(token, cid)
+        target = self.chat(token, cid, chat_type)
         with self.lock:
             now = time.monotonic()
             self.tickets = {k: v for k,v in self.tickets.items() if v['expires'] > now}
             if len(self.tickets) >= 100:
                 raise SendValidationError('確認待ちの操作が多すぎます。しばらく待ってください。')
             ticket = secrets.token_urlsafe(32)
-            self.tickets[ticket] = {**target, 'text': text, 'version': version, 'expires': now + 300}
+            self.tickets[ticket] = {**target, 'text': text, 'version': version, 'chat_type': chat_type, 'expires': now + 300}
         return {**target, 'text': text, 'ticket_id': ticket, 'expires_in': 300}
 
     def status(self, ticket):
@@ -90,7 +90,7 @@ class ConfirmedSender:
             if not approved or approved['expires'] <= time.monotonic():
                 raise SendValidationError('送信確認が期限切れです。本文と宛先を確認し直してください。')
             cid = approved['chat_id']
-            current = self.chat(token, cid)
+            current = self.chat(token, cid, approved['chat_type'])
             if current != {k: approved[k] for k in ('chat_id','title','account_id')}:
                 raise SendValidationError('宛先または送信元が変更されています。確認し直してください。')
             if conversation_version(reader.message_page(token, cid)) != approved['version']:

@@ -239,3 +239,7 @@ button[data-action="send"]  { --action-bg: #136957; --action-text: #fff; --actio
 }
 #groupSummary { margin-top: .8rem; }
 #groupHistory:not(:empty) { margin-bottom: .75rem; }
+
+#groupSendDialog { max-width: min(90vw, 34rem); border: 1px solid #cbded6; border-radius: 12px; }
+#groupConfirmText { font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
+#groupCandidates .candidate { max-width: 100%; }

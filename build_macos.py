@@ -31,8 +31,8 @@ def build(destination):
                       'CFBundleIdentifier': 'jp.line-per-sales.connector',
                       'CFBundleName': 'つながる営業',
                       'CFBundleDisplayName': 'つながる営業',
-                      'CFBundlePackageType': 'APPL', 'CFBundleShortVersionString': '2.9.1',
-                      'CFBundleVersion': '35', 'LSMinimumSystemVersion': '13.0',
+                      'CFBundlePackageType': 'APPL', 'CFBundleShortVersionString': '3.0.0',
+                      'CFBundleVersion': '36', 'LSMinimumSystemVersion': '13.0',
                       'NSHighResolutionCapable': True,
                       'NSLocalNetworkUsageDescription': 'このMac内のBeeperと接続して、選択したLINEトークを読み取ります。'}, f)
     subprocess.run(['/usr/bin/codesign', '--force', '--sign', '-', '--identifier',

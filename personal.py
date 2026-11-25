@@ -126,7 +126,6 @@ def make_handler(token, port, cloud=None, sender=None, attio=None, chat_index=No
     pairing = {"code": None, "expires": 0, "attempts": 0}
     sessions = {}
     allowed = {}
-    allowed_groups = set()
     lock = threading.RLock()
 
     def persist_attio(result,source='deals'):
@@ -338,13 +337,15 @@ def make_handler(token, port, cloud=None, sender=None, attio=None, chat_index=No
                             sessions.pop(bridge_token, None)
                     return self.respond(200, {'ok': True})
                 if self.path == '/api/chats' and data.get('groups') is True:
-                    if set(data) != {'groups'}:
+                    if set(data)-{'groups','query'} or not isinstance(data.get('query',''),str) or len(data.get('query',''))>120:
                         raise ValueError('invalid group list request')
                     groups = {}
                     cursor = None
                     seen_cursors = set()
                     for _ in range(5):
                         params = {'type': 'group', 'limit': 100}
+                        if data.get('query'):
+                            params.update(query=data['query'],scope='titles')
                         if cursor:
                             params.update(cursor=cursor, direction='before')
                         page = metadata_page(reader.http_json(
@@ -352,21 +353,22 @@ def make_handler(token, port, cloud=None, sender=None, attio=None, chat_index=No
                         for group in line_chat_rows(page,'group'):
                             groups.setdefault(group['id'], group)
                         cursor = page['oldestCursor'] if page['hasMore'] else None
-                        if len(groups) >= 15 or not cursor or cursor in seen_cursors:
+                        if len(groups) >= 100 or not cursor or cursor in seen_cursors:
                             break
                         seen_cursors.add(cursor)
-                    result = list(groups.values())[:15]
-                    with lock:
-                        allowed_groups.clear()
-                        allowed_groups.update(group['id'] for group in result)
+                    result = list(groups.values())[:100]
                     return self.respond(200, {'chats':result})
-                if self.path == '/api/conversation' and data.get('group') is True:
-                    if set(data)-{'chat_id','group','summarize'}:
-                        raise ValueError('invalid group conversation request')
+                if self.path in ('/api/conversation','/api/prepare-send') and data.get('group') is True:
                     cid = data.get('chat_id')
-                    with lock:
-                        if not isinstance(cid,str) or cid not in allowed_groups:
-                            return self.respond(400, {'error':'グループLINEの一覧から選び直してください。'})
+                    if not isinstance(cid,str) or not 1<=len(cid)<=512:
+                        raise ValueError('invalid group conversation request')
+                    if self.path == '/api/prepare-send':
+                        if set(data)!={'chat_id','group','text','conversation_version'}:
+                            raise ValueError('invalid group send request')
+                        return self.respond(200,sender.prepare(token,cid,data['text'],data['conversation_version'],'group'))
+                    if set(data)-{'chat_id','group','summarize','reply_purpose'}:
+                        raise ValueError('invalid group conversation request')
+                    sender.chat(token,cid,'group')
                     page = reader.message_page(token,cid)
                     messages = [
                         {'speaker':'自分' if row.get('isSender') is True else str(row.get('senderName') or '発言者不明')[:150],
@@ -375,7 +377,16 @@ def make_handler(token, port, cloud=None, sender=None, attio=None, chat_index=No
                     ][-20:]
                     if data.get('summarize') is True:
                         return self.respond(200, {'summary':sales_assist.summarize_group(messages)})
-                    return self.respond(200, {'messages':messages})
+                    if 'reply_purpose' in data:
+                        purposes = {'schedule':'日程調整','materials':'資料送付','followup':'フォロー','thanks':'お礼'}
+                        purpose = data['reply_purpose']
+                        if not isinstance(purpose,str) or purpose not in purposes or not messages:
+                            raise ValueError('invalid group reply purpose')
+                        return self.respond(200, {'candidates':reader.suggest_with_ollama({
+                            'history':messages[:-1], 'reply_to':messages[-1], 'purpose':purposes[purpose],
+                            'context':'複数人が読むLINEグループへの返信案'
+                        })})
+                    return self.respond(200, {'messages':messages,'conversation_version':conversation_version(page)})
                 if self.path == '/api/chats':
                     if 'lead_chat' in data:
                         chat_id = data['lead_chat']

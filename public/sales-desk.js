@@ -14,17 +14,22 @@ function stored(type,scope=window.salesDeskScope?.()){
     return Array.isArray(value)?value:[];
   }catch{return [];}
 }
-function pins(){
-  return synchronized ? synchronized.filter(row=>row.kind==='pin').map(row=>row.chat_id) : stored('pins');
+const groupPrefix='group:';
+function pins(includeGroups=false){
+  const rows=synchronized ? synchronized.filter(row=>row.kind==='pin').map(row=>row.chat_id) : stored('pins');
+  return rows.filter(id=>id.startsWith(groupPrefix)===includeGroups);
 }
-function hiddenChats(){
-  return synchronized ? synchronized.filter(row=>row.kind==='hide').map(row=>({id:row.chat_id,title:row.title})) : stored('hidden');
+function hiddenChats(includeGroups=false){
+  const rows=synchronized ? synchronized.filter(row=>row.kind==='hide').map(row=>({id:row.chat_id,title:row.title})) : stored('hidden');
+  return rows.filter(row=>row.id.startsWith(groupPrefix)===includeGroups);
 }
-function laterChats(){
-  return synchronized ? synchronized.filter(row=>row.kind==='later') : stored('later');
+function laterChats(includeGroups=false){
+  const rows=synchronized ? synchronized.filter(row=>row.kind==='later') : stored('later');
+  return rows.filter(row=>row.chat_id.startsWith(groupPrefix)===includeGroups);
 }
-function leadChats(){
-  return synchronized ? synchronized.filter(row=>row.kind==='lead').map(row=>({id:row.chat_id,title:row.title})) : stored('lead');
+function leadChats(includeGroups=false){
+  const rows=synchronized ? synchronized.filter(row=>row.kind==='lead').map(row=>({id:row.chat_id,title:row.title})) : stored('lead');
+  return rows.filter(row=>row.id.startsWith(groupPrefix)===includeGroups);
 }
 function renderLeads(){
   const records=leadChats();
@@ -148,7 +153,7 @@ async function syncPreferences(changes=[]){
     }
     return;
   }
-  const oldPins=stored('pins',scope).filter(id=>typeof id==='string'&&id.length>0&&id.length<=256).slice(0,12);
+  const oldPins=stored('pins',scope).filter(id=>typeof id==='string'&&id.length>0&&id.length<=256);
   const oldHidden=stored('hidden',scope).filter(row=>typeof row?.id==='string'&&row.id.length>0&&row.id.length<=256);
   const imported=[
     ...stored('later',scope),
@@ -213,6 +218,7 @@ function checkbox(record,selection){
   check.onchange=()=>{
     if(check.checked)selection.add(record.id);else selection.delete(record.id);
     updateBatchControls();
+    if(selection===groupSelection)updateGroupControls();
   };
   return check;
 }
@@ -528,10 +534,209 @@ for(const tab of lineTabs){
     next.focus();
   };
 }
+let groupRows=[],groupBatch=false,groupVersion=null,groupTemplateKey=null,groupTemplateText='';
+let groupTicket=null,groupLocked=false;
+const groupSelection=new Set();
+const groupKindButtons=document.querySelectorAll('[data-group-kind]');
+const groupToneButtons=document.querySelectorAll('[data-group-tone]');
+function groupPreferences(kind){
+  if(kind==='lead')return leadChats(true);
+  if(kind==='hide')return hiddenChats(true);
+  if(kind==='later')return laterChats(true).map(row=>({id:row.chat_id,title:row.title,returnOn:row.return_on}));
+  return pins(true).map(id=>({id}));
+}
+function renderGroups(){
+  const filter=$('groupFilter').value;
+  const excluded=new Set(['lead','later','hide'].flatMap(kind=>groupPreferences(kind)).map(row=>row.id));
+  const records=filter==='all'||filter==='pin'
+    ? groupRows.filter(row=>!excluded.has(groupPrefix+row.id)&&(filter==='all'||pins(true).includes(groupPrefix+row.id)))
+    : groupPreferences(filter).map(row=>({id:row.id.slice(groupPrefix.length),title:row.title||'グループ',returnOn:row.returnOn}));
+  const pinned=new Set(pins(true));
+  if(filter==='all')records.sort((a,b)=>Number(pinned.has(groupPrefix+b.id))-Number(pinned.has(groupPrefix+a.id)));
+  $('groupList').replaceChildren();
+  for(const group of (filter==='all'?records.slice(0,DISPLAY_LIMIT):records)){
+    const title=(pinned.has(groupPrefix+group.id)?'★ ':'')+group.title;
+    if(groupBatch){
+      const row=make('label','');
+      row.className='desk-option';
+      row.append(checkbox(group,groupSelection),make('span',title));
+      $('groupList').append(row);
+    }else{
+      const button=make('button',title);
+      button.type='button';
+      button.className='chat-button';
+      button.classList.toggle('selected',group.id===activeGroup);
+      button.setAttribute('aria-pressed',String(group.id===activeGroup));
+      if(group.updated||group.returnOn)button.append(make('span',group.returnOn?'次に確認 '+group.returnOn:date(group.updated)));
+      button.onclick=()=>selectGroup(group,button);
+      $('groupList').append(button);
+    }
+  }
+  if(!records.length)$('groupList').append(make('p','該当するグループはありません。'));
+  updateGroupControls();
+}
+function updateGroupControls(){
+  const canReply=Boolean(groupVersion)&&!busy&&!groupLocked;
+  $('groupBatch').classList.toggle('hidden',!groupBatch);
+  $('groupMulti').setAttribute('aria-pressed',String(groupBatch));
+  $('groupMulti').textContent=groupBatch?'選択を終了':'複数選択';
+  $('groupCount').textContent=groupSelection.size+'件選択';
+  const parked=['lead','later','hide'].includes($('groupFilter').value);
+  for(const button of groupKindButtons){
+    button.hidden=parked;
+    button.disabled=busy||syncing||!groupSelection.size;
+  }
+  $('restoreGroups').hidden=!parked;
+  $('restoreGroups').disabled=busy||syncing||!groupSelection.size;
+  $('pinGroup').disabled=busy||syncing||!activeGroup;
+  $('scheduleGroup').disabled=busy||syncing||!groupRows.some(row=>row.id===activeGroup)||groupPreferences('later').some(row=>row.id===groupPrefix+activeGroup);
+  $('pinGroup').textContent=pins(true).includes(groupPrefix+activeGroup)?'ピン留めを解除':'ピン留め';
+  for(const id of ['groupReplyText','groupTemplate','insertGroupTemplate','groupPurpose'])$(id).disabled=!canReply;
+  for(const button of groupToneButtons)button.disabled=!canReply||!groupTemplateKey;
+  $('prepareGroupSend').disabled=!canReply||!$('groupReplyText').value.trim();
+  $('groupDraft').disabled=!canReply||!groupLoaded;
+}
+$('groupMulti').onclick=()=>{groupBatch=!groupBatch;groupSelection.clear();renderGroups();};
+$('groupFilter').onchange=()=>{groupSelection.clear();renderGroups();};
+async function moveGroups(kind,active,selectedIds=groupSelection,returnOn=null){
+  const source=active?groupRows:groupPreferences(kind).map(row=>({id:row.id.slice(groupPrefix.length),title:row.title}));
+  const records=source.filter(row=>selectedIds.has(row.id)).map(row=>({id:groupPrefix+row.id,title:row.title}));
+  if(!records.length||busy||syncing)return;
+  if(records.some(row=>row.id.length>256)){
+    $('groupStatus').textContent='選択したグループの設定を保存できません。';
+    return;
+  }
+  if(kind==='later'&&active){
+    syncing=true;controls();
+    try{
+      const deferredAt=new Date().toISOString();
+      await syncPreferences(records.map(row=>({chat_id:row.id,title:row.title.slice(0,200),kind,active,deferred_at:deferredAt,return_on:returnOn})));
+    }catch(error){$('groupStatus').textContent=error.message;return;}
+    finally{syncing=false;controls();}
+  }else if(kind==='later'){
+    syncing=true;controls();
+    try{await restoreLater(laterChats(true).filter(row=>groupSelection.has(row.chat_id.slice(groupPrefix.length))));}
+    catch(error){$('groupStatus').textContent=error.message;return;}
+    finally{syncing=false;controls();}
+  }else if(!await updatePreferences(kind,records,active))return;
+  if(active&&selectedIds.has(activeGroup))clearGroupConversation();
+  if(!active){
+    const existing=new Set(groupRows.map(row=>row.id));
+    groupRows.unshift(...records.map(row=>({id:row.id.slice(groupPrefix.length),title:row.title})).filter(row=>!existing.has(row.id)));
+    $('groupFilter').value='all';
+  }
+  groupSelection.clear();
+  groupBatch=false;
+  renderGroups();
+}
+for(const button of groupKindButtons)button.onclick=()=>moveGroups(button.dataset.groupKind,true);
+$('restoreGroups').onclick=()=>moveGroups($('groupFilter').value,false);
+$('scheduleGroup').onclick=()=>{
+  $('groupFollowDate').min=jstToday();
+  $('groupFollowForm').classList.toggle('hidden');
+};
+$('groupFollowForm').onsubmit=event=>{
+  event.preventDefault();
+  const day=$('groupFollowDate').value;
+  if(activeGroup&&day>=jstToday())moveGroups('later',true,new Set([activeGroup]),day);
+};
+$('pinGroup').onclick=async()=>{
+  if(!activeGroup)return;
+  const id=groupPrefix+activeGroup;
+  if(id.length<=256&&await updatePreferences('pin',[{id,title:''}],!pins(true).includes(id)))renderGroups();
+};
+function putGroupDraft(value){
+  const field=$('groupReplyText');
+  if(field.disabled||(field.value.trim()&&field.value!==groupTemplateText&&!confirm('下書きを置き換えますか？')))return false;
+  field.value=value.slice(0,1000);
+  field.focus();
+  updateGroupControls();
+  return true;
+}
+$('groupReplyText').oninput=updateGroupControls;
+function applyGroupTemplate(key,tone){
+  const value=window.lineReplyTemplate(key,tone);
+  if(value&&putGroupDraft(value)){
+    groupTemplateKey=key;
+    groupTemplateText=$('groupReplyText').value;
+    updateGroupControls();
+  }
+}
+$('insertGroupTemplate').onclick=()=>applyGroupTemplate($('groupTemplate').value,'standard');
+for(const button of groupToneButtons)button.onclick=()=>applyGroupTemplate(groupTemplateKey,button.dataset.groupTone);
+$('groupDraft').onclick=async()=>{
+  if(busy||!groupLoaded)return;
+  const scope=window.salesDeskScope?.();
+  const candidates=$('groupCandidates');
+  candidates.replaceChildren();
+  $('groupSendNotice').textContent='Macで返信案を作成中…';
+  try{
+    const result=await request('conversation',{chat_id:activeGroup,group:true,reply_purpose:$('groupPurpose').value});
+    if(scope!==window.salesDeskScope?.())return;
+    for(const text of result.candidates){
+      const card=make('div','');
+      card.className='candidate';
+      const button=make('button','この案を下書きに入れる');
+      button.type='button';
+      button.onclick=()=>putGroupDraft(text);
+      card.append(make('p',text),button);
+      candidates.append(card);
+    }
+    $('groupSendNotice').textContent='';
+  }catch(error){if(scope===window.salesDeskScope?.())$('groupSendNotice').textContent=error.message;}
+};
+$('prepareGroupSend').onclick=async()=>{
+  if(busy||groupLocked||!groupVersion)return;
+  const scope=window.salesDeskScope?.();
+  try{
+    const review=await request('prepare-send',{chat_id:activeGroup,group:true,text:$('groupReplyText').value,conversation_version:groupVersion});
+    if(scope!==window.salesDeskScope?.()||review.chat_id!==activeGroup)return;
+    groupTicket=review.ticket_id;
+    $('groupConfirmTarget').textContent=review.title+' · '+review.account_id;
+    $('groupConfirmText').textContent=review.text;
+    $('groupSendDialog').showModal();
+  }catch(error){if(scope===window.salesDeskScope?.())$('groupSendNotice').textContent=error.message;}
+};
+$('cancelGroupSend').onclick=()=>$('groupSendDialog').close();
+function groupSendResult(result){
+  const accepted=result.status==='accepted';
+  $('checkGroupSend').hidden=accepted;
+  $('groupSendNotice').textContent=accepted?'Beeperが送信を受け付けました。':'送信結果が不明です。再送前にLINEで確認してください。';
+  if(accepted){$('groupReplyText').value='';groupVersion=null;groupTicket=null;}
+  controls();
+}
+$('finalGroupSend').onclick=async()=>{
+  if(busy||!groupTicket||groupLocked)return;
+  const scope=window.salesDeskScope?.();
+  groupLocked=true;
+  $('groupSendDialog').close();
+  try{
+    const result=await request('send',{ticket_id:groupTicket});
+    if(scope===window.salesDeskScope?.())groupSendResult(result);
+  }catch{
+    if(scope===window.salesDeskScope?.())groupSendResult({status:'unknown'});
+  }
+};
+$('checkGroupSend').onclick=async()=>{
+  if(busy||!groupTicket)return;
+  const scope=window.salesDeskScope?.();
+  try{
+    const result=await request('send-status',{ticket_id:groupTicket});
+    if(scope===window.salesDeskScope?.())groupSendResult(result);
+  }catch(error){if(scope===window.salesDeskScope?.())$('groupSendNotice').textContent=error.message;}
+};
 let activeGroup=null, groupLoaded=false;
 function clearGroupConversation(){
   activeGroup=null;
   groupLoaded=false;
+  groupVersion=null;groupTicket=null;groupLocked=false;groupTemplateKey=null;groupTemplateText='';
+  $('groupReplyText').value='';
+  $('groupFollowForm').classList.add('hidden');
+  $('groupFollowDate').value='';
+  $('groupCandidates').replaceChildren();
+  $('groupSendNotice').textContent='';
+  $('checkGroupSend').hidden=true;
+  if($('groupSendDialog').open)$('groupSendDialog').close();
   $('groupName').textContent='グループを選んでください';
   $('groupHistoryStatus').textContent='';
   $('groupHistory').replaceChildren();
@@ -551,6 +756,10 @@ function selectGroup(group,button){
 }
 $('loadGroupHistory').onclick=async()=>{
   if(busy||!activeGroup)return;
+  if(groupLocked&&!$('checkGroupSend').hidden&&!confirm('送信結果をLINEで確認してから、会話を読み込み直しますか？'))return;
+  groupLocked=false;groupTicket=null;groupVersion=null;
+  $('checkGroupSend').hidden=true;
+  $('groupSendNotice').textContent='';
   const scope=window.salesDeskScope?.();
   groupLoaded=false;
   $('groupHistory').replaceChildren();
@@ -566,34 +775,34 @@ $('loadGroupHistory').onclick=async()=>{
       $('groupHistory').append(row);
     }
     groupLoaded=result.messages.length>0;
+    groupVersion=result.conversation_version||null;
     $('groupHistoryStatus').textContent=groupLoaded?'':'表示できるテキストはありません。';
   }catch(error){
     if(scope===window.salesDeskScope?.())$('groupHistoryStatus').textContent=error.message;
   }finally{controls();}
 };
-$('loadGroups').onclick=async()=>{
-  if(busy)return;
+async function loadGroupList(query=''){
+  if(busy||syncing)return;
   const scope=window.salesDeskScope?.();
   $('groupStatus').textContent='一覧を取得中…';
+  syncing=true;controls();
   try{
-    const result=await request('chats',{groups:true});
+    await syncPreferences();
+    const due=laterChats(true).filter(row=>row.return_on&&row.return_on<=jstToday());
+    if(due.length)await restoreLater(due);
+    const result=await request('chats',{groups:true,...(query?{query}:{})});
     if(scope!==window.salesDeskScope?.())return;
-    clearGroupConversation();
-    const buttons=result.chats.map(group=>{
-      const button=make('button',group.title);
-      button.type='button';
-      button.className='chat-button';
-      button.append(make('span',date(group.updated)));
-      button.setAttribute('aria-pressed','false');
-      button.onclick=()=>selectGroup(group,button);
-      return button;
-    });
-    $('groupList').replaceChildren(...buttons);
-    $('groupStatus').textContent=buttons.length?'':'グループLINEが見つかりませんでした。';
+    groupRows=result.chats;
+    groupSelection.clear();
+    $('groupFilter').value='all';
+    renderGroups();
+    $('groupStatus').textContent='';
   }catch(error){
     if(scope===window.salesDeskScope?.())$('groupStatus').textContent=error.message;
-  }finally{controls();}
-};
+  }finally{syncing=false;controls();}
+}
+$('loadGroups').onclick=()=>{$('groupQuery').value='';loadGroupList();};
+$('groupSearchForm').onsubmit=event=>{event.preventDefault();loadGroupList($('groupQuery').value.trim());};
 $('groupSummaryButton').onclick=async()=>{
   if(busy||!groupLoaded)return;
   const scope=window.salesDeskScope?.();
@@ -614,7 +823,7 @@ $('groupSummaryButton').onclick=async()=>{
 controls=function(){
   baseControls();
   const scope=window.salesDeskScope?.();
-  if(pinScope!==scope){clearGroupConversation();$('groupList').replaceChildren();$('groupStatus').textContent='';$('chatLoadStatus').textContent='';synchronized=null;batch=false;hideSelection.clear();restoreSelection.clear();laterSelection.clear();leadSelection.clear();if(chats.length){chats=[];follow.clear();followChecked=false;render();}}
+  if(pinScope!==scope){groupRows=[];groupSelection.clear();groupBatch=false;clearGroupConversation();$('groupList').replaceChildren();$('groupStatus').textContent='';$('chatLoadStatus').textContent='';synchronized=null;batch=false;hideSelection.clear();restoreSelection.clear();laterSelection.clear();leadSelection.clear();if(chats.length){chats=[];follow.clear();followChecked=false;render();}}
   pinScope=scope;
   if(lastChat!==selected?.id){
     lastChat=selected?.id;
@@ -627,10 +836,14 @@ controls=function(){
   }
   $('chatOverview').classList.toggle('hidden',!selected);
   $('loadChats').disabled||=syncing;
-  $('loadGroups').disabled=busy;
+  $('loadGroups').disabled=busy||syncing;
+  $('groupMulti').disabled=busy||syncing;
+  $('groupFilter').disabled=busy||syncing;
+  $('groupSearchForm').querySelector('button').disabled=busy||syncing;
+  updateGroupControls();
   $('loadGroupHistory').disabled=busy||!activeGroup;
   $('groupSummaryButton').disabled=busy||!groupLoaded;
-  for(const button of $('groupList').children)button.disabled=busy;
+  for(const input of $('groupList').querySelectorAll('button,input'))input.disabled=busy||syncing;
   $('pinChat').disabled=busy||syncing||!selected;
   $('hideChat').disabled=busy||syncing||!selected;
   const isLead=leadChats().some(row=>row.id===selected?.id);

@@ -34,6 +34,7 @@ const templates={
     short:'恐れ入りますが、打ち合わせの日程を変更できますか？'
   }
 };
+window.lineReplyTemplate=(key,tone)=>templates[key]?.[tone];
 const toneButtons=document.querySelectorAll('[data-reply-tone]');
 let currentTemplate=null,templateText='';
 function useTemplate(key,tone){
