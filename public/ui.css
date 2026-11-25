@@ -355,10 +355,4 @@ button[data-action="send"]  { --action-bg: #136957; --action-text: #fff; --actio
     background: #dbe8e3;
     border-color: #9ab7ab;
   }
-  button[data-action="read"]  { --action-bg: #e0efff; --action-text: #174875; --action-border: #9dbfe1; }
-  button[data-action="ai"]    { --action-bg: #ede2ff; --action-text: #522885; --action-border: #bea4df; }
-  button[data-action="lead"]  { --action-bg: #fff0c9; --action-text: #69430a; --action-border: #dfbd68; }
-  button[data-action="later"] { --action-bg: #dcf3ed; --action-text: #14584c; --action-border: #9fcdbf; }
-  button[data-action="hide"]  { --action-bg: #ffe6eb; --action-text: #842f46; --action-border: #e3a7b7; }
-  button[data-action="send"]  { --action-bg: #12604d; --action-text: #fff; --action-border: #12604d; }
 }
