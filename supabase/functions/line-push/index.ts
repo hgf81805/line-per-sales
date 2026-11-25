@@ -85,10 +85,11 @@ Deno.serve(async req=>{
     const claim=await delivery.insert({user_id:userId,event_id:eventId});
     if(claim.error?.code==='23505')return reply({sent:0,duplicate:true});
     check(claim.error);
+    const isLine=!isTest&&data.kind==='line';
     const payload=JSON.stringify({
       title:'つながる営業',
-      body:isTest?'プッシュ通知を受信できました。':'期限またはLINEの返信を確認してください。',
-      path:'/pipeline.html#today-agenda',
+      body:isTest?'プッシュ通知を受信できました。':isLine?'LINEに新着メッセージがあります。':'期限またはLINEの返信を確認してください。',
+      path:isLine?'/':'/pipeline.html#today-agenda',
     });
     const outcomes=await Promise.all(found.data.map(async row=>{
       if(!validEndpoint(row.endpoint)||row.subscription?.endpoint!==row.endpoint)return false;

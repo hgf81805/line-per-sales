@@ -30,6 +30,8 @@ class CloudRelay:
         self.worker = None
         self.heartbeat = None
         self.push_worker = None
+        self.line_push_worker = None
+        self.line_events = None
         self.status = {'enabled': False, 'connected': False, 'email': '', 'error': ''}
 
     def http(self, path, data=None, method='POST', auth=True, headers=None):
@@ -101,6 +103,38 @@ class CloudRelay:
         self.worker.start()
         self.push_worker=threading.Thread(target=self.push_notifications,daemon=True)
         self.push_worker.start()
+        if self.line_events:
+            self.line_push_worker=threading.Thread(target=self.push_line_messages,daemon=True)
+            self.line_push_worker.start()
+
+    def push_line_messages(self):
+        endpoint='/functions/v1/line-push'
+        active_since=None
+        delivered={}
+        while not self.stop_event.is_set():
+            now=time.time()
+            try:
+                if not self.status['connected'] or not self.http(endpoint,{'action':'has'}).get('enabled'):
+                    active_since=None
+                    delivered.clear()
+                elif active_since is None:
+                    active_since=now
+                else:
+                    cutoff=max(active_since, now-120)
+                    delivered={event:stamp for event,stamp in delivered.items() if stamp>=cutoff}
+                    for event, stamp in self.line_events(cutoff):
+                        if self.stop_event.is_set():
+                            return
+                        if event in delivered:
+                            continue
+                        self.http(endpoint,{'action':'publish','kind':'line','event_id':event})
+                        delivered[event]=stamp
+            except (RuntimeError, ValueError, OSError):
+                # Retry on the next pass without interrupting the connector.
+                pass
+            if self.stop_event.wait(30):
+                return
+
 
     def push_notifications(self):
         endpoint='/functions/v1/line-push'
@@ -222,7 +256,7 @@ class CloudRelay:
     def disconnect(self):
         self.stop_event.set()
         # A request already sent can finish, but its result will never be published after disconnect.
-        for worker in (self.heartbeat, self.worker, self.push_worker):
+        for worker in (self.heartbeat, self.worker, self.push_worker, self.line_push_worker):
             if worker:
                 worker.join(timeout=1)
         with self.lock:

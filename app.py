@@ -73,7 +73,9 @@ def main():
         except (EOFError, KeyboardInterrupt):
             parser.exit(1, '\nトークンの入力を終了しました。\n')
         from cloud_relay import CloudRelay
+        from beeper_reader import unread_line_events
         cloud = CloudRelay()
+        cloud.line_events = lambda since: unread_line_events(token,since)
         chat_index = ChatIndex(token)
         group_index = ChatIndex(token, 'group', maximum=100)
         indexes = (chat_index, group_index)

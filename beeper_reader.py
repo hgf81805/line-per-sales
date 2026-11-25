@@ -1,6 +1,8 @@
 """Beeper reads and local Ollama generation, extracted from the supplied app.
 Sending is implemented separately by confirmed_send with explicit confirmation.
 """
+from datetime import datetime
+import hashlib
 import json
 import os
 from urllib.error import HTTPError, URLError
@@ -53,6 +55,51 @@ def last_inbound(items):
     # Returns only if the latest useful message is from the other party.
     useful = [m for m in items if keep_message(m)]
     return useful[-1] if useful and useful[-1].get('isSender') is False else None
+
+def activity_time(value):
+    try:
+        parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
+        return parsed.timestamp() if parsed.tzinfo else 0
+    except (AttributeError, ValueError):
+        return 0
+
+
+def unread_line_events(token, since):
+    """Yield only hashes and timestamps for recent incoming LINE messages."""
+    cursor = None
+    seen = set()
+    for _ in range(3):
+        params = {'type':'any', 'unreadOnly':'true', 'limit':50}
+        if cursor:
+            params.update(cursor=cursor, direction='before')
+        page = http_json(BEEPER_URL+'/v1/chats/search?'+urlencode(params), token=token)
+        for chat in page.get('items') or []:
+            cid = chat.get('id')
+            if (not isinstance(cid,str) or not cid or chat.get('type') not in ('single','group')
+                    or str(chat.get('network','')).lower()!='line' or chat.get('merge') or chat.get('mergedIntoChatID')):
+                continue
+            activity = activity_time(chat.get('lastActivity') or chat.get('lastActivityAt') or chat.get('updatedAt'))
+            if activity and activity < since:
+                continue
+            try:
+                messages = message_page(token,cid).get('items') or []
+            except (RuntimeError, ValueError, OSError):
+                continue
+            for message in sorted(messages,key=message_order,reverse=True):
+                stamp = activity_time(message.get('timestamp'))
+                mid = message.get('id')
+                if (stamp>=since and isinstance(mid,str) and mid and message.get('isSender') is False
+                    and message.get('isUnread') is not False and not message.get('isDeleted')
+                    and not message.get('isHidden') and message.get('type') in
+                    (None,'TEXT','IMAGE','VIDEO','AUDIO','VOICE','FILE','STICKER','LOCATION')):
+                    digest = hashlib.sha256(json.dumps(['line-incoming',cid,mid]).encode()).hexdigest()
+                    yield digest, stamp
+                    break
+        cursor = page.get('oldestCursor') if page.get('hasMore') else None
+        if not cursor or cursor in seen:
+            break
+        seen.add(cursor)
+
 
 def reply_context(token, cid, target_id, page):
     messages = {}
