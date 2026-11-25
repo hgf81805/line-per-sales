@@ -225,3 +225,9 @@ button[data-action="send"]  { --action-bg: #136957; --action-text: #fff; --actio
     font-size: 16px;
   }
 }
+
+#groupPanel > summary { cursor: pointer; }
+.group-line-tools { margin: .8rem 0; }
+#groupList { display: flex; flex-wrap: wrap; gap: .45rem; }
+#groupList button[aria-pressed="true"] { background: #e4f0ec; border-color: #91bbaa; }
+#groupConversation { margin-top: .8rem; }

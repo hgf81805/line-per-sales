@@ -37,11 +37,11 @@ def metadata_page(page):
     return result
 
 
-def line_chat_rows(page):
+def line_chat_rows(page, chat_type='single'):
     for chat in page['items']:
         network = chat.get('network')
         chat_id = chat.get('id')
-        if (chat.get('type') != 'single' or not isinstance(network, str) or network.lower() != 'line'
+        if (chat.get('type') != chat_type or not isinstance(network, str) or network.lower() != 'line'
                 or chat.get('merge') or not isinstance(chat_id, str) or not chat_id):
             continue
         yield {'id': chat_id, 'title': chat.get('title') or '名称未設定',
@@ -126,6 +126,7 @@ def make_handler(token, port, cloud=None, sender=None, attio=None, chat_index=No
     pairing = {"code": None, "expires": 0, "attempts": 0}
     sessions = {}
     allowed = {}
+    allowed_groups = set()
     lock = threading.RLock()
 
     def persist_attio(result,source='deals'):
@@ -336,6 +337,45 @@ def make_handler(token, port, cloud=None, sender=None, attio=None, chat_index=No
                         else:
                             sessions.pop(bridge_token, None)
                     return self.respond(200, {'ok': True})
+                if self.path == '/api/chats' and data.get('groups') is True:
+                    if set(data) != {'groups'}:
+                        raise ValueError('invalid group list request')
+                    groups = {}
+                    cursor = None
+                    seen_cursors = set()
+                    for _ in range(5):
+                        params = {'type': 'group', 'limit': 100}
+                        if cursor:
+                            params.update(cursor=cursor, direction='before')
+                        page = metadata_page(reader.http_json(
+                            reader.BEEPER_URL + '/v1/chats/search?' + urlencode(params), token=token))
+                        for group in line_chat_rows(page,'group'):
+                            groups.setdefault(group['id'], group)
+                        cursor = page['oldestCursor'] if page['hasMore'] else None
+                        if len(groups) >= 15 or not cursor or cursor in seen_cursors:
+                            break
+                        seen_cursors.add(cursor)
+                    result = list(groups.values())[:15]
+                    with lock:
+                        allowed_groups.clear()
+                        allowed_groups.update(group['id'] for group in result)
+                    return self.respond(200, {'chats':result})
+                if self.path == '/api/conversation' and data.get('group') is True:
+                    if set(data)-{'chat_id','group','summarize'}:
+                        raise ValueError('invalid group conversation request')
+                    cid = data.get('chat_id')
+                    with lock:
+                        if not isinstance(cid,str) or cid not in allowed_groups:
+                            return self.respond(400, {'error':'グループLINEの一覧から選び直してください。'})
+                    page = reader.message_page(token,cid)
+                    messages = [
+                        {'speaker':'自分' if row.get('isSender') is True else str(row.get('senderName') or '発言者不明')[:150],
+                         'text':row['text'][:1200], 'timestamp':row.get('timestamp') or ''}
+                        for row in sorted(page.get('items') or [],key=reader.message_order) if reader.keep_message(row)
+                    ][-20:]
+                    if data.get('summarize') is True:
+                        return self.respond(200, {'summary':sales_assist.summarize_group(messages)})
+                    return self.respond(200, {'messages':messages})
                 if self.path == '/api/chats':
                     if 'lead_chat' in data:
                         chat_id = data['lead_chat']

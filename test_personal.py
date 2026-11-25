@@ -121,6 +121,38 @@ class PersonalTest(unittest.TestCase):
         self.assertEqual(cloud.http.call_count, 4)
         self.assertTrue(all(kwargs['method'] == 'GET' for _, kwargs in cloud.http.call_args_list))
 
+    def test_group_read_and_summary_are_separate_from_direct_chats(self):
+        def upstream(url, **kwargs):
+            if '/chats/search?' in url and 'type=group' in url:
+                return {'items': [
+                    {'id':'group','title':'営業チーム','type':'group','network':'LINE'},
+                    {'id':'other','type':'group','network':'Discord'},
+                    {'id':'c0','type':'single','network':'LINE'},
+                ]}
+            if url.endswith('/group/messages'):
+                return {'items': [
+                    {'id':'1','senderName':'佐藤','text':'金曜に商談します'},
+                    {'id':'2','senderName':'本人','isSender':True,'text':'了解しました'},
+                    {'id':'3','senderName':'佐藤','text':'削除された文','isDeleted':True},
+                ]}
+            if url.endswith('/api/generate'):
+                self.assertNotIn('削除された文',kwargs['data']['prompt'])
+                return {'response':json.dumps({'decisions':'商談する','requests':'該当なし','schedule':'金曜'})}
+            return self.upstream(url, **kwargs)
+
+        with patch.object(personal.reader,'http_json',side_effect=upstream):
+            self.assertEqual(self.api('conversation',{'group':True,'chat_id':'group'})[0],400)
+            status, groups = self.api('chats',{'groups':True})
+            self.assertEqual(status,200)
+            self.assertEqual([row['id'] for row in groups['chats']],['group'])
+            status, history = self.api('conversation',{'group':True,'chat_id':'group'})
+            self.assertEqual(status,200)
+            self.assertEqual([row['speaker'] for row in history['messages']],['佐藤','自分'])
+            status, summary = self.api('conversation',{'group':True,'chat_id':'group','summarize':True})
+            self.assertEqual(status,200)
+            self.assertEqual(summary['summary']['schedule'],'金曜')
+            self.assertEqual(self.api('prepare-send',{'chat_id':'group','text':'送信','conversation_version':'v'})[0],400)
+
     def test_history_and_local_generation(self):
         self.api('chats')
         status, data = self.api('conversation', {'chat_id': 'c0'})

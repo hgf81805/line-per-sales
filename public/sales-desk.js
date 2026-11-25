@@ -509,10 +509,80 @@ window.salesDesk={
     $('overviewNotes').classList.toggle('hidden',!notes.children.length);
   }
 };
+let activeGroup=null, groupLoaded=false;
+function clearGroupConversation(){
+  activeGroup=null;
+  groupLoaded=false;
+  $('groupConversation').hidden=true;
+  $('groupHistory').replaceChildren();
+  $('groupSummary').replaceChildren();
+}
+async function openGroup(group,button){
+  if(busy)return;
+  const scope=window.salesDeskScope?.();
+  clearGroupConversation();
+  activeGroup=group.id;
+  $('groupName').textContent=group.title;
+  $('groupConversation').hidden=false;
+  for(const item of $('groupList').children)item.setAttribute('aria-pressed',String(item===button));
+  $('groupStatus').textContent='会話を取得中…';
+  try{
+    const result=await request('conversation',{chat_id:group.id,group:true});
+    if(scope!==window.salesDeskScope?.())return;
+    for(const message of result.messages){
+      const row=make('div',message.text);
+      row.className='message';
+      row.prepend(make('small',[message.speaker,message.timestamp?date(message.timestamp):''].filter(Boolean).join(' · ')));
+      $('groupHistory').append(row);
+    }
+    groupLoaded=result.messages.length>0;
+    $('groupStatus').textContent=groupLoaded?'':'表示できるテキストはありません。';
+  }catch(error){
+    if(scope===window.salesDeskScope?.())$('groupStatus').textContent=error.message;
+  }finally{controls();}
+}
+$('loadGroups').onclick=async()=>{
+  if(busy)return;
+  const scope=window.salesDeskScope?.();
+  $('groupStatus').textContent='一覧を取得中…';
+  try{
+    const result=await request('chats',{groups:true});
+    if(scope!==window.salesDeskScope?.())return;
+    clearGroupConversation();
+    const buttons=result.chats.map(group=>{
+      const button=make('button',group.title);
+      button.type='button';
+      button.setAttribute('aria-pressed','false');
+      button.onclick=()=>openGroup(group,button);
+      return button;
+    });
+    $('groupList').replaceChildren(...buttons);
+    $('groupStatus').textContent=buttons.length?'':'グループLINEが見つかりませんでした。';
+  }catch(error){
+    if(scope===window.salesDeskScope?.())$('groupStatus').textContent=error.message;
+  }
+};
+$('groupSummaryButton').onclick=async()=>{
+  if(busy||!groupLoaded)return;
+  const scope=window.salesDeskScope?.();
+  $('groupStatus').textContent='Macで要点を整理中…';
+  try{
+    const {summary}=await request('conversation',{chat_id:activeGroup,group:true,summarize:true});
+    if(scope!==window.salesDeskScope?.())return;
+    const list=make('dl','');
+    for(const [key,label] of Object.entries({decisions:'決まったこと',requests:'自分への依頼',schedule:'次の予定'})){
+      list.append(make('dt',label),make('dd',summary[key]));
+    }
+    $('groupSummary').replaceChildren(list);
+    $('groupStatus').textContent='';
+  }catch(error){
+    if(scope===window.salesDeskScope?.())$('groupStatus').textContent=error.message;
+  }
+};
 controls=function(){
   baseControls();
   const scope=window.salesDeskScope?.();
-  if(pinScope!==scope){$('chatLoadStatus').textContent='';synchronized=null;batch=false;hideSelection.clear();restoreSelection.clear();laterSelection.clear();leadSelection.clear();if(chats.length){chats=[];follow.clear();followChecked=false;render();}}
+  if(pinScope!==scope){clearGroupConversation();$('groupList').replaceChildren();$('groupStatus').textContent='';$('chatLoadStatus').textContent='';synchronized=null;batch=false;hideSelection.clear();restoreSelection.clear();laterSelection.clear();leadSelection.clear();if(chats.length){chats=[];follow.clear();followChecked=false;render();}}
   pinScope=scope;
   if(lastChat!==selected?.id){
     lastChat=selected?.id;
@@ -525,6 +595,9 @@ controls=function(){
   }
   $('chatOverview').classList.toggle('hidden',!selected);
   $('loadChats').disabled||=syncing;
+  $('loadGroups').disabled=busy;
+  $('groupSummaryButton').disabled=busy||!groupLoaded;
+  for(const button of $('groupList').children)button.disabled=busy;
   $('pinChat').disabled=busy||syncing||!selected;
   $('hideChat').disabled=busy||syncing||!selected;
   const isLead=leadChats().some(row=>row.id===selected?.id);
