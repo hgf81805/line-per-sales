@@ -6,7 +6,7 @@ const LIST_LIMIT=DISPLAY_LIMIT+RESERVE_LIMIT;
 let chats=[], follow=new Map(), followChecked=false, lastChat=null, pinScope=null;
 const make=(tag,text)=>{const node=document.createElement(tag);node.textContent=text;return node;};
 let synchronized=null, syncing=false, batch=false;
-const hideSelection=new Set(), restoreSelection=new Set(), laterSelection=new Set();
+const hideSelection=new Set(), restoreSelection=new Set(), laterSelection=new Set(), leadSelection=new Set();
 function stored(type,scope=window.salesDeskScope?.()){
   if(!scope)return [];
   try{
@@ -28,6 +28,8 @@ function leadChats(){
 }
 function renderLeads(){
   const records=leadChats();
+  const available=new Set(records.map(row=>row.id));
+  for(const id of leadSelection)if(!available.has(id))leadSelection.delete(id);
   $('leadChatSettings').hidden=!records.length;
   $('leadChatSummary').textContent='優先リード（'+records.length+'件）';
   const items=$('leadChatItems');
@@ -52,7 +54,7 @@ function renderLeads(){
     restore.onclick=async()=>{
       if(await updatePreferences('lead',[record],false))applyRestoredChats([record]);
     };
-    row.append(open,restore);
+    row.append(checkbox(record,leadSelection),open,restore);
     items.append(row);
   }
 }
@@ -193,6 +195,9 @@ function updateBatchControls(){
   $('chatBatchToggle').disabled=busy||syncing;
   $('laterRestoreCount').textContent=laterSelection.size+'件選択';
   $('laterRestoreSelected').disabled=busy||syncing||!laterSelection.size;
+  $('leadRestoreCount').textContent=leadSelection.size+'件選択';
+  $('leadRestoreSelected').disabled=busy||syncing||!leadSelection.size;
+  $('chatBatchLead').disabled=busy||syncing||!hideSelection.size;
   $('chatBatchLater').disabled=busy||syncing||!hideSelection.size;
   $('chatBatchLaterSave').disabled=busy||syncing||!hideSelection.size;
   if(!batch||!hideSelection.size)showBatchLater(false);
@@ -452,17 +457,23 @@ $('laterRestoreSelected').onclick=async()=>{
   finally{syncing=false;controls();}
   applyRestoredChats(records);
 };
-$('leadChat').onclick=async()=>{
-  if(busy||syncing||!selected)return;
-  const record=selected;
-  if(record.id.length>256){
-    $('chatFilterStatus').textContent='このトークを優先リードに移せません。';
+async function moveToLeads(records){
+  if(!records.length)return;
+  if(records.some(record=>record.id.length>256)){
+    $('chatFilterStatus').textContent='選択したトークを優先リードに移せません。';
     return;
   }
-  if(await updatePreferences('lead',[record],true)){
+  if(await updatePreferences('lead',records,true)){
+    batch=false;
     applyVisibility();
     $('leadChatSettings').open=true;
   }
+}
+$('leadChat').onclick=()=>selected&&moveToLeads([selected]);
+$('chatBatchLead').onclick=()=>moveToLeads(chats.filter(record=>hideSelection.has(record.id)));
+$('leadRestoreSelected').onclick=async()=>{
+  const records=leadChats().filter(record=>leadSelection.has(record.id));
+  if(records.length&&await updatePreferences('lead',records,false))applyRestoredChats(records);
 };
 $('hideChat').onclick=async()=>{
   if(busy||syncing||!selected)return;
@@ -501,7 +512,7 @@ window.salesDesk={
 controls=function(){
   baseControls();
   const scope=window.salesDeskScope?.();
-  if(pinScope!==scope){$('chatLoadStatus').textContent='';synchronized=null;batch=false;hideSelection.clear();restoreSelection.clear();laterSelection.clear();if(chats.length){chats=[];follow.clear();followChecked=false;render();}}
+  if(pinScope!==scope){$('chatLoadStatus').textContent='';synchronized=null;batch=false;hideSelection.clear();restoreSelection.clear();laterSelection.clear();leadSelection.clear();if(chats.length){chats=[];follow.clear();followChecked=false;render();}}
   pinScope=scope;
   if(lastChat!==selected?.id){
     lastChat=selected?.id;
