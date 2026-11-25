@@ -317,3 +317,48 @@ button[data-action="send"]  { --action-bg: #136957; --action-text: #fff; --actio
     box-shadow: 0 6px 20px #173b3520;
   }
 }
+
+@media (max-width: 760px) {
+  .line-workspace { color: #19332d; }
+  .line-workspace > .panel, .line-workspace .grid > .panel { padding: .85rem; }
+  .line-workspace .mobile-detail > .panel:nth-child(2) { padding-bottom: 5rem; }
+  .line-workspace h2 { font-size: 1.05rem; line-height: 1.35; }
+  .line-workspace .desk-tools { gap: .65rem; padding: .65rem; }
+  .line-workspace .reply-tools, .line-workspace .reply-template { gap: .45rem; }
+  .line-workspace .reply-composer { padding: .75rem; }
+  .line-workspace :is(.reply-body, .reply-template) { margin-top: .7rem; }
+  .line-workspace .muted { color: #4b6259; }
+  .line-workspace button:not(.chat-button), #sendDialog button, #groupSendDialog button {
+    min-height: 34px;
+    padding: .25rem .5rem;
+    line-height: 1.35;
+    font-size: .8rem;
+    font-weight: 600;
+  }
+  .line-workspace .mobile-reply-bar {
+    gap: .45rem;
+    padding: .4rem .7rem calc(.4rem + env(safe-area-inset-bottom));
+    background: #fff;
+  }
+  .line-workspace .mobile-reply-bar button { min-height: 38px; }
+  .line-workspace .mobile-back {
+    color: #234e70;
+    background: #edf5fc;
+    border-color: #aac9e1;
+  }
+  .line-workspace .mobile-chat-actions summary {
+    min-width: 36px;
+    min-height: 44px;
+    background: #eef3f1;
+  }
+  .line-workspace .mobile-chat-actions[open] summary {
+    background: #dbe8e3;
+    border-color: #9ab7ab;
+  }
+  button[data-action="read"]  { --action-bg: #e0efff; --action-text: #174875; --action-border: #9dbfe1; }
+  button[data-action="ai"]    { --action-bg: #ede2ff; --action-text: #522885; --action-border: #bea4df; }
+  button[data-action="lead"]  { --action-bg: #fff0c9; --action-text: #69430a; --action-border: #dfbd68; }
+  button[data-action="later"] { --action-bg: #dcf3ed; --action-text: #14584c; --action-border: #9fcdbf; }
+  button[data-action="hide"]  { --action-bg: #ffe6eb; --action-text: #842f46; --action-border: #e3a7b7; }
+  button[data-action="send"]  { --action-bg: #12604d; --action-text: #fff; --action-border: #12604d; }
+}
