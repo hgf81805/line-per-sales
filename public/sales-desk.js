@@ -241,17 +241,76 @@ function isVisible(chat,marked){
     (filter==='reply'&&reasons.includes('こちらの返信待ち'))||
     (filter==='due'&&reasons.some(reason=>reason==='今日が期限'||reason==='期限超過'));
 }
+const mobileTalk=matchMedia('(max-width: 760px)');
+const listPosition=new Map();
+const listFocus=new Map();
+function openMobileTalk(kind){
+  if(!mobileTalk.matches)return;
+  const panel=$(kind+'Panel');
+  if(!panel.classList.contains('mobile-detail')){
+    listPosition.set(kind,window.scrollY);
+    const focused=document.activeElement;
+    if(panel.contains(focused))listFocus.set(kind,focused.dataset.mobileChatId||focused.dataset.chatId);
+  }
+  panel.classList.add('mobile-detail');
+  $(kind+'Back').focus({preventScroll:true});
+  window.scrollTo(0,0);
+}
+for(const kind of ['direct','group']){
+  $(kind+'Back').onclick=()=>{
+    const panel=$(kind+'Panel');
+    panel.classList.remove('mobile-detail');
+    const previous=[...panel.querySelectorAll('.chat-button')].find(button=>(button.dataset.mobileChatId||button.dataset.chatId)===listFocus.get(kind));
+    (previous||$(kind==='direct'?'loadChats':'loadGroups')).focus({preventScroll:true});
+    window.scrollTo(0,listPosition.get(kind)||0);
+  };
+}
+function withQuickActions(button,record,isGroup){
+  const row=make('div','');
+  row.className='mobile-chat-row';
+  const actions=document.createElement('details');
+  actions.className='mobile-chat-actions';
+  const toggle=make('summary','⋯');
+  toggle.setAttribute('aria-label',record.title+'を整理');
+  const menu=make('div','');
+  menu.className='mobile-chat-menu';
+  for(const [kind,label] of [['lead','優先リードに移す'],['later','あとで見る'],['hide','一覧から隠す']]){
+    const action=make('button',label);
+    action.type='button';
+    action.dataset.action=kind;
+    action.onclick=async()=>{
+      if(busy||syncing)return;
+      if(kind==='hide'&&!confirm('このトークを一覧から隠しますか？'))return;
+      actions.open=false;
+      if(isGroup){await moveGroups(kind,true,new Set([record.id]));return;}
+      if(kind==='lead'){await moveToLeads([record]);return;}
+      if(record.id.length>256){$('chatFilterStatus').textContent='このトークの設定を保存できません。';return;}
+      const saved=kind==='later'?await deferChats([record],null):await updatePreferences('hide',[record],true);
+      if(saved)applyVisibility();
+    };
+    menu.append(action);
+  }
+  actions.ontoggle=()=>{
+    if(!actions.open)return;
+    for(const other of document.querySelectorAll('.mobile-chat-actions[open]'))if(other!==actions)other.open=false;
+  };
+  actions.append(toggle,menu);
+  row.append(button,actions);
+  return row;
+}
 function choose(chat,fromLead=false){
   if(busy||(!fromLead&&!chats.includes(chat)))return;
   if(chat.needsRefresh){
     $('chatFilterStatus').textContent='会話を開くには「LINE一覧を手動更新」を押してください。';
     return;
   }
+  openMobileTalk('direct');
+  if(selected?.id===chat.id)return;
   selected=chat;messageId=null;conversationVersion=null;
   $('name').textContent=chat.title;
   $('history').replaceChildren();$('candidates').replaceChildren();
   render();controls();
-  $('chatOverview').scrollIntoView({block:'nearest'});
+  if(!mobileTalk.matches)$('chatOverview').scrollIntoView({block:'nearest'});
 }
 function render(){
   const marked=pins();
@@ -278,7 +337,7 @@ function render(){
       row.append(checkbox(chat,hideSelection),name);
       if(reasons.length)name.append(make('small',reasons.join(' ／ ')));
       fragment.append(row);
-    }else fragment.append(item);
+    }else fragment.append(withQuickActions(item,chat,false));
   }
   $('chats').replaceChildren(fragment);
   updateBatchControls();
@@ -573,7 +632,8 @@ function renderGroups(){
       button.setAttribute('aria-pressed',String(group.id===activeGroup));
       if(group.updated||group.returnOn)button.append(make('span',group.returnOn?'次に確認 '+group.returnOn:date(group.updated)));
       button.onclick=()=>selectGroup(group,button);
-      $('groupList').append(button);
+      button.dataset.mobileChatId=group.id;
+      $('groupList').append(filter==='all'||filter==='pin'?withQuickActions(button,group,true):button);
     }
   }
   if(!records.length)$('groupList').append(make('p','該当するグループはありません。'));
@@ -754,6 +814,8 @@ function clearGroupConversation(){
 }
 function selectGroup(group,button){
   if(busy)return;
+  openMobileTalk('group');
+  if(activeGroup===group.id)return;
   clearGroupConversation();
   activeGroup=group.id;
   $('groupName').textContent=group.title;
@@ -830,10 +892,25 @@ $('groupSummaryButton').onclick=async()=>{
     if(scope===window.salesDeskScope?.())$('groupHistoryStatus').textContent=error.message;
   }
 };
+for(const [kind,history,field,ai] of [
+  ['direct','loadHistory','replyText','purposeDraft'],
+  ['group','loadGroupHistory','groupReplyText','groupDraft']
+]){
+  async function openReply(useAI){
+    if(busy)return;
+    if($(field).disabled&&$(history).disabled===false)await $(history).onclick();
+    if($(field).disabled)return;
+    if(useAI&&!$(ai).disabled)$(ai).click();
+    $(field).scrollIntoView({block:'center'});
+    if(!useAI)$(field).focus({preventScroll:true});
+  }
+  $(kind+'Write').onclick=()=>openReply(false);
+  $(kind+'AI').onclick=()=>openReply(true);
+}
 controls=function(){
   baseControls();
   const scope=window.salesDeskScope?.();
-  if(pinScope!==scope){groupRows=[];groupSelection.clear();for(const shelf of groupShelves)shelf.selection.clear();groupBatch=false;clearGroupConversation();$('groupList').replaceChildren();$('groupStatus').textContent='';$('chatLoadStatus').textContent='';synchronized=null;batch=false;hideSelection.clear();restoreSelection.clear();laterSelection.clear();leadSelection.clear();if(chats.length){chats=[];follow.clear();followChecked=false;render();}}
+  if(pinScope!==scope){$('directPanel').classList.remove('mobile-detail');$('groupPanel').classList.remove('mobile-detail');listPosition.clear();listFocus.clear();groupRows=[];groupSelection.clear();for(const shelf of groupShelves)shelf.selection.clear();groupBatch=false;clearGroupConversation();$('groupList').replaceChildren();$('groupStatus').textContent='';$('chatLoadStatus').textContent='';synchronized=null;batch=false;hideSelection.clear();restoreSelection.clear();laterSelection.clear();leadSelection.clear();if(chats.length){chats=[];follow.clear();followChecked=false;render();}}
   pinScope=scope;
   if(lastChat!==selected?.id){
     lastChat=selected?.id;
@@ -843,6 +920,9 @@ controls=function(){
     $('overviewNoteItems').replaceChildren();
   }
   $('chatOverview').classList.toggle('hidden',!selected);
+  if(!selected)$('directPanel').classList.remove('mobile-detail');
+  if(!activeGroup)$('groupPanel').classList.remove('mobile-detail');
+  for(const id of ['directWrite','directAI','groupWrite','groupAI'])$(id).disabled=busy;
   $('loadChats').disabled||=syncing;
   if(groupShelves.some(shelf=>shelf.summary.textContent!==shelf.label+'（'+groupPreferences(shelf.kind).length+'件）'))renderGroupShelves();
   $('loadGroups').disabled=busy||syncing;
