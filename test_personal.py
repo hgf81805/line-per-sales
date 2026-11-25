@@ -123,6 +123,36 @@ class PersonalTest(unittest.TestCase):
         self.assertEqual(cloud.http.call_count, 4)
         self.assertTrue(all(kwargs['method'] == 'GET' for _, kwargs in cloud.http.call_args_list))
 
+    def test_group_index_serves_metadata_and_keeps_search_live(self):
+        index = personal.ChatIndex('test-token', 'group', maximum=100)
+        self.server.RequestHandlerClass = personal.make_handler(
+            'test-token', self.server.server_port, group_index=index)
+        with urlopen(self.url) as response:
+            self.csrf = re.search("csrf='([^']+)'", response.read().decode())[1]
+
+        def groups(url, **_):
+            params = parse_qs(urlsplit(url).query)
+            self.assertEqual(params['type'], ['group'])
+            if 'query' in params:
+                self.assertEqual(params['scope'], ['titles'])
+                return {'items': []}
+            return {'items': [
+                {'id':'group','type':'group','network':'LINE','title':'営業','preview':{'text':'private'}},
+                {'id':'direct','type':'single','network':'LINE'},
+                {'id':'other','type':'group','network':'Discord'},
+            ]}
+
+        with patch.object(personal.reader, 'http_json', side_effect=groups) as beeper:
+            index.refresh()
+            beeper.reset_mock()
+            for _ in range(2):
+                status, result = self.api('chats', {'groups':True})
+                self.assertEqual(status, 200)
+                self.assertEqual(result['chats'], [{'id':'group','title':'営業','updated':''}])
+            beeper.assert_not_called()
+            self.assertEqual(self.api('chats', {'groups':True,'query':'別件'})[1]['chats'], [])
+            beeper.assert_called_once()
+
     def test_group_read_and_summary_are_separate_from_direct_chats(self):
         def upstream(url, **kwargs):
             if '/chats/search?' in url and 'type=group' in url:

@@ -59,7 +59,7 @@ def main():
         parser.error('ポート番号は1〜65535で指定してください。')
     handler = Handler
     cloud = None
-    chat_index = None
+    indexes = ()
     if args.personal:
         from personal import ChatIndex, make_handler
         from token_store import get_token, KeychainError
@@ -75,7 +75,9 @@ def main():
         from cloud_relay import CloudRelay
         cloud = CloudRelay()
         chat_index = ChatIndex(token)
-        handler = make_handler(token, args.port, cloud=cloud, chat_index=chat_index)
+        group_index = ChatIndex(token, 'group', maximum=100)
+        indexes = (chat_index, group_index)
+        handler = make_handler(token, args.port, cloud=cloud, chat_index=chat_index, group_index=group_index)
     try:
         server = ThreadingHTTPServer(('127.0.0.1', args.port), handler)
     except OSError as exc:
@@ -100,8 +102,8 @@ def main():
                 return data
         cloud.dispatch = dispatch
         threading.Thread(target=cloud.restore, daemon=True).start()
-    if chat_index is not None:
-        chat_index.start()
+    for index in indexes:
+        index.start()
     if args.token_stdin:
         print('LINE_CONNECTOR_READY', flush=True)
     url = f'http://127.0.0.1:{args.port}'

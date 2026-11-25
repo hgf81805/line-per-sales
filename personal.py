@@ -48,35 +48,46 @@ def line_chat_rows(page, chat_type='single'):
                'updated': chat.get('lastActivity') or chat.get('lastActivityAt') or chat.get('updatedAt') or ''}
 
 
+def scan_line_chats(token, chat_type, query='', maximum=None):
+    rows = {}
+    cursor = None
+    seen_cursors = set()
+    for _ in range(5):
+        params = {'type': chat_type, 'limit': 100}
+        if query:
+            params.update(query=query, scope='titles')
+        if cursor:
+            params.update(cursor=cursor, direction='before')
+        page = metadata_page(reader.http_json(
+            reader.BEEPER_URL + '/v1/chats/search?' + urlencode(params), token=token))
+        for row in line_chat_rows(page, chat_type):
+            rows.setdefault(row['id'], row)
+        cursor = page['oldestCursor'] if page['hasMore'] else None
+        if not cursor or cursor in seen_cursors:
+            cursor = None
+            break
+        if maximum is not None and len(rows) >= maximum:
+            break
+        seen_cursors.add(cursor)
+    return rows, cursor
+
+
 class ChatIndex:
     """Bounded, process-local LINE metadata index and short-lived pagination state."""
     REFRESH_INTERVAL = 30
     CURSOR_PREFIX = 'line-index:'
 
-    def __init__(self, token):
+    def __init__(self, token, chat_type='single', maximum=None):
         self.token = token
+        self.chat_type = chat_type
+        self.maximum = maximum
         self.lock = threading.Lock()
         self.snapshot = None
         self.cursors = {}
 
     def refresh(self):
-        rows = {}
-        cursor = None
-        seen = set()
         started = time.monotonic()
-        for _ in range(5):
-            params = {'type': 'single', 'limit': 100}
-            if cursor:
-                params.update(cursor=cursor, direction='before')
-            page = metadata_page(reader.http_json(
-                reader.BEEPER_URL + '/v1/chats/search?' + urlencode(params), token=self.token))
-            for row in line_chat_rows(page):
-                rows.setdefault(row['id'], row)
-            cursor = page['oldestCursor'] if page['hasMore'] else None
-            if not cursor or cursor in seen:
-                cursor = None
-                break
-            seen.add(cursor)
+        rows, cursor = scan_line_chats(self.token, self.chat_type, maximum=self.maximum)
         with self.lock:
             self.snapshot = (started, rows, cursor)
             cutoff = time.monotonic()
@@ -91,7 +102,7 @@ class ChatIndex:
             time.sleep(self.REFRESH_INTERVAL)
 
     def start(self):
-        threading.Thread(target=self.run, name='line-chat-index', daemon=True).start()
+        threading.Thread(target=self.run, name=f'line-{self.chat_type}-index', daemon=True).start()
 
     def lookup(self, cursor):
         now = time.monotonic()
@@ -117,7 +128,7 @@ class ChatIndex:
         return key
 
 
-def make_handler(token, port, cloud=None, sender=None, attio=None, chat_index=None):
+def make_handler(token, port, cloud=None, sender=None, attio=None, chat_index=None, group_index=None):
     attio = attio or AttioBridge()
     sender = sender or ConfirmedSender()
     csrf = secrets.token_urlsafe(32)
@@ -339,24 +350,13 @@ def make_handler(token, port, cloud=None, sender=None, attio=None, chat_index=No
                 if self.path == '/api/chats' and data.get('groups') is True:
                     if set(data)-{'groups','query'} or not isinstance(data.get('query',''),str) or len(data.get('query',''))>120:
                         raise ValueError('invalid group list request')
-                    groups = {}
-                    cursor = None
-                    seen_cursors = set()
-                    for _ in range(5):
-                        params = {'type': 'group', 'limit': 100}
-                        if data.get('query'):
-                            params.update(query=data['query'],scope='titles')
-                        if cursor:
-                            params.update(cursor=cursor, direction='before')
-                        page = metadata_page(reader.http_json(
-                            reader.BEEPER_URL + '/v1/chats/search?' + urlencode(params), token=token))
-                        for group in line_chat_rows(page,'group'):
-                            groups.setdefault(group['id'], group)
-                        cursor = page['oldestCursor'] if page['hasMore'] else None
-                        if len(groups) >= 100 or not cursor or cursor in seen_cursors:
-                            break
-                        seen_cursors.add(cursor)
-                    result = list(groups.values())[:100]
+                    query = data.get('query','').strip()
+                    indexed = group_index.lookup(None) if group_index and not query else None
+                    if indexed:
+                        result = indexed[1][:100]
+                    else:
+                        groups, _ = scan_line_chats(token, 'group', query=query, maximum=100)
+                        result = list(groups.values())[:100]
                     return self.respond(200, {'chats':result})
                 if self.path in ('/api/conversation','/api/prepare-send') and data.get('group') is True:
                     cid = data.get('chat_id')
