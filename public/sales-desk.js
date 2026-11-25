@@ -214,7 +214,7 @@ function checkbox(record,selection){
   check.onchange=()=>{
     if(check.checked)selection.add(record.id);else selection.delete(record.id);
     updateBatchControls();
-    if(selection===groupSelection)updateGroupControls();
+    if(selection===groupSelection||groupShelves.some(shelf=>shelf.selection===selection))updateGroupControls();
   };
   return check;
 }
@@ -514,6 +514,35 @@ let groupTicket=null,groupLocked=false;
 const groupSelection=new Set();
 const groupKindButtons=document.querySelectorAll('[data-group-kind]');
 const groupToneButtons=document.querySelectorAll('[data-group-tone]');
+const groupShelves=[...document.querySelectorAll('[data-group-shelf]')].map(element=>({
+  kind:element.dataset.groupShelf, element, summary:element.querySelector('summary'),
+  label:element.querySelector('summary').textContent, items:element.querySelector('.group-shelf-items'),
+  restore:element.querySelector('.group-shelf-restore'), selection:new Set()
+}));
+for(const shelf of groupShelves)shelf.restore.onclick=()=>moveGroups(shelf.kind,false,shelf.selection);
+
+function renderGroupShelves(){
+  for(const shelf of groupShelves){
+    const records=groupPreferences(shelf.kind).map(row=>({...row,id:row.id.slice(groupPrefix.length)}));
+    const available=new Set(records.map(row=>row.id));
+    for(const id of shelf.selection)if(!available.has(id))shelf.selection.delete(id);
+    shelf.element.hidden=!records.length;
+    shelf.summary.textContent=shelf.label+'（'+records.length+'件）';
+    shelf.items.replaceChildren();
+    for(const group of records){
+      const row=make('div','');
+      row.className='desk-option';
+      const open=make('button',group.title||'グループ');
+      open.type='button';
+      open.className='chat-button';
+      if(group.returnOn)open.append(make('span','次に確認 '+group.returnOn));
+      open.onclick=()=>selectGroup(group,open);
+      row.append(checkbox({...group,title:group.title||'グループ'},shelf.selection),open);
+      shelf.items.append(row);
+    }
+  }
+}
+
 function groupPreferences(kind){
   if(kind==='lead')return leadChats(true);
   if(kind==='hide')return hiddenChats(true);
@@ -548,10 +577,15 @@ function renderGroups(){
     }
   }
   if(!records.length)$('groupList').append(make('p','該当するグループはありません。'));
+  renderGroupShelves();
   updateGroupControls();
 }
 function updateGroupControls(){
   const canReply=Boolean(groupVersion)&&!busy&&!groupLocked;
+  for(const shelf of groupShelves){
+    shelf.restore.disabled=busy||syncing||!shelf.selection.size;
+    for(const control of shelf.items.querySelectorAll('button,input'))control.disabled=busy||syncing;
+  }
   $('groupBatch').classList.toggle('hidden',!groupBatch);
   $('groupMulti').setAttribute('aria-pressed',String(groupBatch));
   $('groupMulti').textContent=groupBatch?'選択を終了':'複数選択';
@@ -590,7 +624,7 @@ async function moveGroups(kind,active,selectedIds=groupSelection,returnOn=null){
     finally{syncing=false;controls();}
   }else if(kind==='later'){
     syncing=true;controls();
-    try{await restoreLater(laterChats(true).filter(row=>groupSelection.has(row.chat_id.slice(groupPrefix.length))));}
+    try{await restoreLater(laterChats(true).filter(row=>selectedIds.has(row.chat_id.slice(groupPrefix.length))));}
     catch(error){$('groupStatus').textContent=error.message;return;}
     finally{syncing=false;controls();}
   }else if(!await updatePreferences(kind,records,active))return;
@@ -600,6 +634,7 @@ async function moveGroups(kind,active,selectedIds=groupSelection,returnOn=null){
     groupRows.unshift(...records.map(row=>({id:row.id.slice(groupPrefix.length),title:row.title})).filter(row=>!existing.has(row.id)));
     $('groupFilter').value='all';
   }
+  selectedIds.clear();
   groupSelection.clear();
   groupBatch=false;
   renderGroups();
@@ -722,7 +757,7 @@ function selectGroup(group,button){
   clearGroupConversation();
   activeGroup=group.id;
   $('groupName').textContent=group.title;
-  for(const item of $('groupList').children){
+  for(const item of $('groupPanel').querySelectorAll('.chat-button')){
     const current=item===button;
     item.classList.toggle('selected',current);
     item.setAttribute('aria-pressed',String(current));
@@ -798,7 +833,7 @@ $('groupSummaryButton').onclick=async()=>{
 controls=function(){
   baseControls();
   const scope=window.salesDeskScope?.();
-  if(pinScope!==scope){groupRows=[];groupSelection.clear();groupBatch=false;clearGroupConversation();$('groupList').replaceChildren();$('groupStatus').textContent='';$('chatLoadStatus').textContent='';synchronized=null;batch=false;hideSelection.clear();restoreSelection.clear();laterSelection.clear();leadSelection.clear();if(chats.length){chats=[];follow.clear();followChecked=false;render();}}
+  if(pinScope!==scope){groupRows=[];groupSelection.clear();for(const shelf of groupShelves)shelf.selection.clear();groupBatch=false;clearGroupConversation();$('groupList').replaceChildren();$('groupStatus').textContent='';$('chatLoadStatus').textContent='';synchronized=null;batch=false;hideSelection.clear();restoreSelection.clear();laterSelection.clear();leadSelection.clear();if(chats.length){chats=[];follow.clear();followChecked=false;render();}}
   pinScope=scope;
   if(lastChat!==selected?.id){
     lastChat=selected?.id;
@@ -809,6 +844,7 @@ controls=function(){
   }
   $('chatOverview').classList.toggle('hidden',!selected);
   $('loadChats').disabled||=syncing;
+  if(groupShelves.some(shelf=>shelf.summary.textContent!==shelf.label+'（'+groupPreferences(shelf.kind).length+'件）'))renderGroupShelves();
   $('loadGroups').disabled=busy||syncing;
   $('groupMulti').disabled=busy||syncing;
   $('groupFilter').disabled=busy||syncing;
