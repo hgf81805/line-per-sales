@@ -169,3 +169,59 @@ a.button { display: inline-flex; align-items: center; }
   margin: 0 0 .9rem;
 }
 .chat-refresh [role="status"]:empty { display: none; }
+
+.reply-template {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: .55rem;
+  margin-top: 1rem;
+  padding: .8rem;
+  border: 1px solid #dce7e3;
+  border-radius: 12px;
+  background: #eef5f3;
+}
+.reply-template-variants { flex-basis: 100%; }
+@media (max-width: 480px) {
+  .reply-template .desk-field { flex-basis: 100%; }
+}
+
+/* Keep compact controls scoped to the LINE workspace. */
+.line-workspace button, #sendDialog button {
+  min-height: 30px;
+  padding: .32rem .6rem;
+  border-radius: 7px;
+  font-size: .82rem;
+}
+.line-workspace .desk-search-row input, .line-workspace .desk-field select {
+  min-height: 32px;
+  padding-block: .3rem;
+}
+.line-workspace .desk-batch-actions {
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  gap: .4rem;
+  padding: .6rem;
+}
+.line-workspace .desk-batch-actions [role="status"] { flex-basis: 100%; }
+.line-workspace .desk-option { padding: .45rem .6rem; }
+.line-workspace .chat-button { padding: .45rem .65rem; }
+.line-workspace button[data-action], #sendDialog button[data-action] {
+  background: var(--action-bg);
+  color: var(--action-text);
+  border-color: var(--action-border);
+}
+button[data-action="read"]  { --action-bg: #eaf2f8; --action-text: #234e70; --action-border: #bfd5e5; }
+button[data-action="ai"]    { --action-bg: #f0ebf9; --action-text: #553781; --action-border: #d5c6eb; }
+button[data-action="lead"]  { --action-bg: #f9efdb; --action-text: #6f490e; --action-border: #e9cf9b; }
+button[data-action="later"] { --action-bg: #e9f2ee; --action-text: #2d5d51; --action-border: #bfdacf; }
+button[data-action="hide"]  { --action-bg: #f8edef; --action-text: #793c47; --action-border: #e8cbd1; }
+button[data-action="send"]  { --action-bg: #136957; --action-text: #fff; --action-border: #136957; }
+@media (pointer: coarse), (max-width: 600px) {
+  .line-workspace button, #sendDialog button { min-height: 40px; }
+  .line-workspace .desk-search-row input, .line-workspace .desk-field select {
+    min-height: 40px;
+    font-size: 16px;
+  }
+}

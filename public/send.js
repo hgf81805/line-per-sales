@@ -2,11 +2,60 @@
 (() => {
 'use strict';
 let ticket=null,locked=false,previousChat=null,preparing=false;
+const templates={
+  schedule:{
+    standard:'お打ち合わせの日程を調整できればと思います。ご都合のよい日時をいくつか教えていただけますか？',
+    polite:'お打ち合わせの機会をいただけますでしょうか。お手数ですが、ご都合のよい日時をいくつかお知らせいただけますと幸いです。',
+    warm:'よければ、一度お話しできるとうれしいです。ご都合のよい日時があれば教えてください。',
+    short:'お打ち合わせの候補日時をいくつか教えていただけますか？'
+  },
+  materials:{
+    standard:'先ほどの件について、資料をお送りします。ご不明点がありましたら、お気軽にご連絡ください。',
+    polite:'先ほどお話しした件につきまして、資料をお送りいたします。ご確認いただき、ご不明な点がございましたらお知らせください。',
+    warm:'先ほどお話しした資料をお送りします。気になるところがあれば、いつでも聞いてください。',
+    short:'資料をお送りします。ご質問があればお知らせください。'
+  },
+  followup:{
+    standard:'先日お送りした件について、その後いかがでしょうか。検討にあたって必要な情報があればお送りします。',
+    polite:'先日ご連絡した件につきまして、ご検討状況をお聞かせいただけますでしょうか。追加で必要な情報がございましたらお申し付けください。',
+    warm:'先日お送りした件、その後いかがでしょうか？ 気になる点があれば、いつでも聞いてください。',
+    short:'先日の件、その後いかがでしょうか？ 必要な情報があればお送りします。'
+  },
+  thanks:{
+    standard:'本日はお時間をいただき、ありがとうございました。お話しした内容を踏まえて、改めてご連絡します。',
+    polite:'本日はお忙しい中、お時間をいただき誠にありがとうございました。お伺いした内容を踏まえ、改めてご連絡いたします。',
+    warm:'今日はお話しできてよかったです。お時間をいただきありがとうございました。また改めてご連絡します。',
+    short:'本日はありがとうございました。改めてご連絡します。'
+  },
+  reschedule:{
+    standard:'恐れ入りますが、予定していたお打ち合わせの日程を変更できますか？ ご都合のよい日時を教えていただけると助かります。',
+    polite:'お手数をおかけして申し訳ありませんが、お打ち合わせの日程を再調整させていただけますでしょうか。ご都合のよい日時をお知らせいただけますと幸いです。',
+    warm:'すみません、予定していたお打ち合わせを別の日に調整できますか？ 空いている日時を教えていただけるとうれしいです。',
+    short:'恐れ入りますが、打ち合わせの日程を変更できますか？'
+  }
+};
+const toneButtons=document.querySelectorAll('[data-reply-tone]');
+let currentTemplate=null,templateText='';
+function useTemplate(key,tone){
+  const field=$('replyText');
+  const next=templates[key]?.[tone];
+  if(field.disabled||!next)return;
+  if(field.value.trim()&&field.value!==templateText&&!confirm('現在の下書きをテンプレートで置き換えますか？'))return;
+  currentTemplate=key;
+  templateText=next;
+  field.value=next;
+  field.dispatchEvent(new Event('input'));
+  field.focus();
+}
+$('insertReplyTemplate').onclick=()=>useTemplate($('replyTemplate').value,'standard');
+for(const button of toneButtons)button.onclick=()=>useTemplate(currentTemplate,button.dataset.replyTone);
 const originalControls=controls;
 function sendControls(){
-  if(previousChat!==selected?.id){previousChat=selected?.id;ticket=null;locked=false;$('replyText').value='';$('checkSend').classList.add('hidden');}
+  if(previousChat!==selected?.id){previousChat=selected?.id;ticket=null;locked=false;currentTemplate=null;templateText='';$('replyText').value='';$('checkSend').classList.add('hidden');}
   if(selected&&$('history').children.length&&!conversationVersion&&!locked)$('sendNotice').textContent='送信するにはMacアプリを最新版に更新し、会話を読み込み直してください。';
   $('replyText').disabled=busy||locked||!conversationVersion;
+  $('replyTemplate').disabled=$('insertReplyTemplate').disabled=$('replyText').disabled;
+  for(const button of toneButtons)button.disabled=$('replyText').disabled||!currentTemplate||!$('replyText').value.trim();
   $('prepareSend').disabled=busy||locked||!conversationVersion||!$('replyText').value.trim();
   $('finalSend').disabled=busy||!ticket;$('cancelSend').disabled=busy;
 }
