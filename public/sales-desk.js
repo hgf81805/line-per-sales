@@ -131,10 +131,6 @@ function renderLater(){
     items.append(row);
   }
 }
-function showLaterForm(open){
-  $('laterChatForm').classList.toggle('hidden',!open);
-  $('laterChat').setAttribute('aria-expanded',String(open));
-}
 async function syncPreferences(changes=[]){
   const scope=window.salesDeskScope?.();
   if(!scope)throw new Error('先にMacへ接続してください。');
@@ -404,13 +400,6 @@ $('chatBatchRestore').onclick=async()=>{
     applyRestoredChats(records);
   }
 };
-$('laterChat').onclick=()=>{
-  if(busy||syncing||!selected)return;
-  const open=$('laterChatForm').classList.contains('hidden');
-  showLaterForm(open);
-  if(open){$('laterReturnOn').min=jstToday();$('laterReturnOn').focus();}
-};
-$('laterCancel').onclick=()=>showLaterForm(false);
 function showBatchLater(open){
   $('chatBatchLaterForm').classList.toggle('hidden',!open);
   $('chatBatchLater').setAttribute('aria-expanded',String(open));
@@ -438,13 +427,6 @@ async function deferChats(records,returnOn){
   }catch(error){$('chatFilterStatus').textContent=error.message;return false;}
   finally{syncing=false;controls();}
 }
-$('laterChatForm').onsubmit=async event=>{
-  event.preventDefault();
-  if(selected&&await deferChats([selected],$('laterReturnOn').value)){
-    showLaterForm(false);
-    applyVisibility();
-  }
-};
 $('chatBatchLaterForm').onsubmit=async event=>{
   event.preventDefault();
   const records=chats.filter(record=>hideSelection.has(record.id));
@@ -475,17 +457,10 @@ async function moveToLeads(records){
     $('leadChatSettings').open=true;
   }
 }
-$('leadChat').onclick=()=>selected&&moveToLeads([selected]);
 $('chatBatchLead').onclick=()=>moveToLeads(chats.filter(record=>hideSelection.has(record.id)));
 $('leadRestoreSelected').onclick=async()=>{
   const records=leadChats().filter(record=>leadSelection.has(record.id));
   if(records.length&&await updatePreferences('lead',records,false))applyRestoredChats(records);
-};
-$('hideChat').onclick=async()=>{
-  if(busy||syncing||!selected)return;
-  if(selected.id.length>256){$('chatFilterStatus').textContent='このトークを非表示にできません。';return;}
-  if(!confirm('「'+selected.title+'」を一覧から隠しますか？'))return;
-  if(await updatePreferences('hide',[selected],true))applyVisibility();
 };
 $('pinChat').onclick=async()=>{
   if(busy||syncing||!selected)return;
@@ -827,8 +802,6 @@ controls=function(){
   pinScope=scope;
   if(lastChat!==selected?.id){
     lastChat=selected?.id;
-    showLaterForm(false);
-    $('laterReturnOn').value='';
     $('chatOverviewStatus').textContent='案件を確認中…';
     $('overviewNotes').open=false;
     $('overviewNotes').classList.add('hidden');
@@ -845,14 +818,6 @@ controls=function(){
   $('groupSummaryButton').disabled=busy||!groupLoaded;
   for(const input of $('groupList').querySelectorAll('button,input'))input.disabled=busy||syncing;
   $('pinChat').disabled=busy||syncing||!selected;
-  $('hideChat').disabled=busy||syncing||!selected;
-  const isLead=leadChats().some(row=>row.id===selected?.id);
-  $('leadChat').hidden=isLead;
-  $('leadChat').disabled=busy||syncing||!selected;
-  $('hideChat').hidden=isLead;
-  $('laterChat').hidden=isLead;
-  $('laterChat').disabled=busy||syncing||!selected;
-  for(const field of $('laterChatForm').elements)field.disabled=busy||syncing;
   renderLeads();
   renderLater();
   $('chats').querySelectorAll('input[type=checkbox]').forEach(check=>check.disabled=busy||syncing);
