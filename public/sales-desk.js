@@ -1,7 +1,7 @@
 (() => {
 'use strict';
 const baseControls=controls;
-const DISPLAY_LIMIT=15, RESERVE_LIMIT=5;
+const DISPLAY_LIMIT=10, RESERVE_LIMIT=5;
 const LIST_LIMIT=DISPLAY_LIMIT+RESERVE_LIMIT;
 let chats=[], follow=new Map(), followChecked=false, lastChat=null, pinScope=null;
 const make=(tag,text)=>{const node=document.createElement(tag);node.textContent=text;return node;};
@@ -275,6 +275,7 @@ async function load(query='', openChat=null, releasedIds=null){
   const scope=window.salesDeskScope?.();
   const status=$('chatLoadStatus');
   const hadList=chats.length>0;
+  let primaryShown=false;
   status.textContent=hadList?'更新中…':'取得中…';
   hideSelection.clear();
   try{
@@ -286,7 +287,8 @@ async function load(query='', openChat=null, releasedIds=null){
     let cursor=null;
     do{
       const response=await request('chats',{
-        count:DISPLAY_LIMIT, paged:true,
+        count:primaryShown?RESERVE_LIMIT:DISPLAY_LIMIT, paged:true,
+        ...(synchronized?{saved_exclusions:true}:{}),
         ...(query?{query}:{}),
         ...(!cursor&&ids.length?{pins:ids}:{}),
         ...(cursor?{cursor}:{}),
@@ -294,14 +296,17 @@ async function load(query='', openChat=null, releasedIds=null){
       },true);
       if(scope!==window.salesDeskScope?.())return false;
       for(const chat of response.chats)if(!excluded.has(chat.id))visible.set(chat.id,chat);
-      if(!hadList&&visible.size>chats.length){
-        chats=[...visible.values()].slice(0,LIST_LIMIT);
-        render();
-        status.textContent='取得中…';
-      }
       cursor=response.next_cursor;
-      if(cursor&&seenCursors.has(cursor))break;
+      if(cursor&&seenCursors.has(cursor))cursor=null;
       if(cursor)seenCursors.add(cursor);
+      if(!primaryShown&&(!hadList||visible.size>=DISPLAY_LIMIT||!cursor)){
+        chats=[...visible.values()].slice(0,DISPLAY_LIMIT);
+        render();
+      }
+      if(!primaryShown&&(visible.size>=DISPLAY_LIMIT||!cursor)){
+        primaryShown=true;
+        status.textContent=cursor&&visible.size<LIST_LIMIT?'予備を取得中…':'';
+      }
     }while(cursor&&visible.size<LIST_LIMIT);
     chats=[...visible.values()].slice(0,LIST_LIMIT);
     render();
@@ -311,7 +316,7 @@ async function load(query='', openChat=null, releasedIds=null){
     if(releasedIds===null&&laterChats().length)void refreshDeferred(query,scope);
     return true;
   }catch(error){
-    if(scope===window.salesDeskScope?.())status.textContent='一覧を更新できませんでした。 '+error.message;
+    if(scope===window.salesDeskScope?.())status.textContent=(primaryShown?'予備を取得できませんでした。':'一覧を更新できませんでした。')+' '+error.message;
     return false;
   }
   finally{syncing=false;controls();}

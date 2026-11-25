@@ -267,16 +267,31 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
                     expanded = bool(query.strip() or pins)
                     limit = max(12 if expanded else 5,count)
                     seen_exclusions = set(excluded)
+                    saved_exclusions = data.get('saved_exclusions') is True and cloud and cloud.credentials
+                    if saved_exclusions:
+                        offset = 0
+                        while True:
+                            rows = cloud.http('/rest/v1/line_chat_preferences'
+                                              '?select=chat_id&active=eq.true&kind=in.(hide,later)'
+                                              f'&order=kind,chat_id&limit=100&offset={offset}', method='GET') or []
+                            seen_exclusions.update(row['chat_id'] for row in rows)
+                            if len(rows) < 100:
+                                break
+                            offset += len(rows)
                     cursor = data.get('cursor')
                     paged = data.get('paged') is True
                     if cursor is not None and (not paged or not isinstance(cursor,str) or not cursor or len(cursor)>2048):
                         raise ValueError('invalid cursor')
+                    if saved_exclusions and paged:
+                        limit = count
                     continuation = cursor is not None
                     next_cursor = None
                     found = []
                     seen = set()
                     if not query.strip():
                         for pinned in pins:
+                            if len(found) >= limit:
+                                break
                             if not isinstance(pinned,str) or not pinned or len(pinned)>512 or pinned in seen or pinned in seen_exclusions:
                                 continue
                             try:
@@ -285,7 +300,7 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
                                 continue
                             found.append({'id':pinned,'title':current['title'],'updated':''})
                             seen.add(pinned)
-                    for _ in range(6 if count>=10 else 3):
+                    for _ in range(24 if saved_exclusions else 6 if count>=10 else 3):
                         if len(found)>=limit:
                             break
                         params = {'type': 'single', 'limit': limit-len(found) if paged else limit}

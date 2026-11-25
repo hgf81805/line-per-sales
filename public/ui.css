@@ -160,3 +160,12 @@ a.button { display: inline-flex; align-items: center; }
   .desk-filter-row { grid-template-columns: minmax(0, 1fr); }
   .desk-filter-row button { justify-self: start; }
 }
+
+.chat-refresh {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .4rem .75rem;
+  margin: 0 0 .9rem;
+}
+.chat-refresh [role="status"]:empty { display: none; }
