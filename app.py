@@ -59,8 +59,9 @@ def main():
         parser.error('ポート番号は1〜65535で指定してください。')
     handler = Handler
     cloud = None
+    chat_index = None
     if args.personal:
-        from personal import make_handler
+        from personal import ChatIndex, make_handler
         from token_store import get_token, KeychainError
         print('Beeperを起動してください。トークンはこのMacのキーチェーンで管理します。')
         try:
@@ -73,7 +74,8 @@ def main():
             parser.exit(1, '\nトークンの入力を終了しました。\n')
         from cloud_relay import CloudRelay
         cloud = CloudRelay()
-        handler = make_handler(token, args.port, cloud=cloud)
+        chat_index = ChatIndex(token)
+        handler = make_handler(token, args.port, cloud=cloud, chat_index=chat_index)
     try:
         server = ThreadingHTTPServer(('127.0.0.1', args.port), handler)
     except OSError as exc:
@@ -98,6 +100,8 @@ def main():
                 return data
         cloud.dispatch = dispatch
         threading.Thread(target=cloud.restore, daemon=True).start()
+    if chat_index is not None:
+        chat_index.start()
     if args.token_stdin:
         print('LINE_CONNECTOR_READY', flush=True)
     url = f'http://127.0.0.1:{args.port}'

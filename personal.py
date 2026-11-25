@@ -23,6 +23,8 @@ def metadata_page(page):
     This is logical disposal, not a guarantee of physical memory zeroization.
     No upstream response body is logged or persisted.
     """
+    if not isinstance(page, dict):
+        raise ValueError('Beeperの一覧を読み込めませんでした。')
     result = {'items': [], 'hasMore': bool(page.get('hasMore')),
               'oldestCursor': page.get('oldestCursor')}
     for chat in page.get('items') or []:
@@ -35,7 +37,87 @@ def metadata_page(page):
     return result
 
 
-def make_handler(token, port, cloud=None, sender=None, attio=None):
+def line_chat_rows(page):
+    for chat in page['items']:
+        network = chat.get('network')
+        chat_id = chat.get('id')
+        if (chat.get('type') != 'single' or not isinstance(network, str) or network.lower() != 'line'
+                or chat.get('merge') or not isinstance(chat_id, str) or not chat_id):
+            continue
+        yield {'id': chat_id, 'title': chat.get('title') or '名称未設定',
+               'updated': chat.get('lastActivity') or chat.get('lastActivityAt') or chat.get('updatedAt') or ''}
+
+
+class ChatIndex:
+    """Bounded, process-local LINE metadata index and short-lived pagination state."""
+    REFRESH_INTERVAL = 30
+    CURSOR_PREFIX = 'line-index:'
+
+    def __init__(self, token):
+        self.token = token
+        self.lock = threading.Lock()
+        self.snapshot = None
+        self.cursors = {}
+
+    def refresh(self):
+        rows = {}
+        cursor = None
+        seen = set()
+        started = time.monotonic()
+        for _ in range(5):
+            params = {'type': 'single', 'limit': 100}
+            if cursor:
+                params.update(cursor=cursor, direction='before')
+            page = metadata_page(reader.http_json(
+                reader.BEEPER_URL + '/v1/chats/search?' + urlencode(params), token=self.token))
+            for row in line_chat_rows(page):
+                rows.setdefault(row['id'], row)
+            cursor = page['oldestCursor'] if page['hasMore'] else None
+            if not cursor or cursor in seen:
+                cursor = None
+                break
+            seen.add(cursor)
+        with self.lock:
+            self.snapshot = (started, rows, cursor)
+            cutoff = time.monotonic()
+            self.cursors = {key: value for key, value in self.cursors.items() if value[0] > cutoff}
+
+    def run(self):
+        while True:
+            try:
+                self.refresh()
+            except (RuntimeError, ValueError, OSError):
+                pass
+            time.sleep(self.REFRESH_INTERVAL)
+
+    def start(self):
+        threading.Thread(target=self.run, name='line-chat-index', daemon=True).start()
+
+    def lookup(self, cursor):
+        now = time.monotonic()
+        with self.lock:
+            if cursor and cursor.startswith(self.CURSOR_PREFIX):
+                page = self.cursors.get(cursor)
+                if not page or page[0] <= now:
+                    raise ValueError('一覧の取得をやり直してください。')
+                return page[1:]
+            if not cursor and self.snapshot and now-self.snapshot[0] <= self.REFRESH_INTERVAL*2:
+                _, rows, tail = self.snapshot
+                return rows, tuple(rows.values()), tail
+        return None
+
+    def continuation(self, rows, remaining, tail):
+        if not remaining:
+            return tail
+        key = self.CURSOR_PREFIX + secrets.token_urlsafe(18)
+        with self.lock:
+            if len(self.cursors) >= 32:
+                self.cursors.pop(next(iter(self.cursors)))
+            self.cursors[key] = (time.monotonic()+180, rows, remaining, tail)
+        return key
+
+
+def make_handler(token, port, cloud=None, sender=None, attio=None, chat_index=None):
     attio = attio or AttioBridge()
     sender = sender or ConfirmedSender()
     csrf = secrets.token_urlsafe(32)
@@ -284,6 +366,8 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
                         raise ValueError('invalid cursor')
                     if saved_exclusions and paged:
                         limit = count
+                    indexed = chat_index.lookup(cursor) if chat_index and paged and not query.strip() else None
+                    indexed_rows = indexed[0] if indexed else {}
                     continuation = cursor is not None
                     next_cursor = None
                     found = []
@@ -294,13 +378,29 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
                                 break
                             if not isinstance(pinned,str) or not pinned or len(pinned)>512 or pinned in seen or pinned in seen_exclusions:
                                 continue
+                            if pinned in indexed_rows:
+                                found.append(indexed_rows[pinned])
+                                seen.add(pinned)
+                                continue
                             try:
                                 current = sender.chat(token,pinned)
                             except (RuntimeError, ValueError, OSError):
                                 continue
                             found.append({'id':pinned,'title':current['title'],'updated':''})
                             seen.add(pinned)
-                    for _ in range(24 if saved_exclusions else 6 if count>=10 else 3):
+                    if indexed:
+                        _, remaining, tail = indexed
+                        for offset, row in enumerate(remaining):
+                            if len(found) >= limit:
+                                next_cursor = chat_index.continuation(indexed_rows, remaining[offset:], tail)
+                                break
+                            if row['id'] not in seen and row['id'] not in seen_exclusions:
+                                found.append(row)
+                                seen.add(row['id'])
+                        else:
+                            next_cursor = tail
+                    scan_pages = 24 if saved_exclusions else 6 if count >= 10 else 3
+                    for _ in range(0 if indexed else scan_pages):
                         if len(found)>=limit:
                             break
                         params = {'type': 'single', 'limit': limit-len(found) if paged else limit}
@@ -310,12 +410,10 @@ def make_handler(token, port, cloud=None, sender=None, attio=None):
                             params.update(cursor=cursor, direction='before')
                         page = metadata_page(reader.http_json(
                             reader.BEEPER_URL + '/v1/chats/search?' + urlencode(params), token=token))
-                        for c in page.get('items') or []:
-                            if c.get('type') != 'single' or (c.get('network') or '').lower() != 'line' or c.get('merge') or c.get('mergedIntoChatID') or not c.get('id'):
-                                continue
-                            if c['id'] not in seen and c['id'] not in seen_exclusions:
-                                seen.add(c['id'])
-                                found.append({'id': c['id'], 'title': c.get('title') or '名称未設定', 'updated': c.get('lastActivity') or c.get('lastActivityAt') or c.get('updatedAt') or ''})
+                        for row in line_chat_rows(page):
+                            if row['id'] not in seen and row['id'] not in seen_exclusions:
+                                seen.add(row['id'])
+                                found.append(row)
                             if len(found) == limit:
                                 break
                         older = page.get('oldestCursor')

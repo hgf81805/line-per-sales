@@ -1,7 +1,7 @@
 (() => {
 'use strict';
 const baseControls=controls;
-const DISPLAY_LIMIT=10, RESERVE_LIMIT=5;
+const DISPLAY_LIMIT=15, RESERVE_LIMIT=5;
 const LIST_LIMIT=DISPLAY_LIMIT+RESERVE_LIMIT;
 let chats=[], follow=new Map(), followChecked=false, lastChat=null, pinScope=null;
 const make=(tag,text)=>{const node=document.createElement(tag);node.textContent=text;return node;};

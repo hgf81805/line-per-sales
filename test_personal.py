@@ -80,30 +80,44 @@ class PersonalTest(unittest.TestCase):
         self.assertNotIn('must not be returned', json.dumps(data))
 
     def test_saved_exclusions_fill_display_and_reserve_across_pages(self):
+        self.check_saved_exclusions(use_index=False)
+
+    def test_warm_index_serves_display_and_reserve_without_beeper_requests(self):
+        self.check_saved_exclusions(use_index=True)
+
+    def check_saved_exclusions(self, use_index):
         cloud = Mock()
         cloud.http.side_effect = lambda path, **_: [
             {'chat_id': f'c{i}'} for i in (range(100) if path.endswith('=0') else range(100, 120))
         ]
-        self.server.RequestHandlerClass = personal.make_handler('test-token', self.server.server_port, cloud=cloud)
+        index = personal.ChatIndex('test-token') if use_index else None
+        self.server.RequestHandlerClass = personal.make_handler('test-token', self.server.server_port,
+                                                                 cloud=cloud, chat_index=index)
         with urlopen(self.url) as response:
             self.csrf = re.search("csrf='([^']+)'", response.read().decode())[1]
 
         def page(url, **_):
             params = parse_qs(urlsplit(url).query)
             start = int(params.get('cursor', ['0'])[0])
-            end = min(start + int(params['limit'][0]), 135)
+            end = min(start + int(params['limit'][0]), 140)
             return {'items': [{'id': f'c{i}', 'type': 'single', 'network': 'LINE'}
                               for i in range(start, end)],
-                    'hasMore': end < 135, 'oldestCursor': str(end)}
+                    'hasMore': end < 140, 'oldestCursor': str(end)}
 
-        with patch.object(personal.reader, 'http_json', side_effect=page):
-            status, first = self.api('chats', {'count': 10, 'paged': True, 'saved_exclusions': True})
+        with patch.object(personal.reader, 'http_json', side_effect=page) as upstream:
+            if index:
+                index.refresh()
+                self.assertEqual(upstream.call_count, 2)
+                upstream.reset_mock()
+            status, first = self.api('chats', {'count': 15, 'paged': True, 'saved_exclusions': True})
             self.assertEqual(status, 200)
-            self.assertEqual([row['id'] for row in first['chats']], [f'c{i}' for i in range(120, 130)])
+            self.assertEqual([row['id'] for row in first['chats']], [f'c{i}' for i in range(120, 135)])
             status, reserve = self.api('chats', {'count': 5, 'paged': True, 'saved_exclusions': True,
                                                  'cursor': first['next_cursor']})
             self.assertEqual(status, 200)
-            self.assertEqual([row['id'] for row in reserve['chats']], [f'c{i}' for i in range(130, 135)])
+            self.assertEqual([row['id'] for row in reserve['chats']], [f'c{i}' for i in range(135, 140)])
+            if index:
+                upstream.assert_not_called()
         self.assertEqual(cloud.http.call_count, 4)
         self.assertTrue(all(kwargs['method'] == 'GET' for _, kwargs in cloud.http.call_args_list))
 
