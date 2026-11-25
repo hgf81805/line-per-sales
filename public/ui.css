@@ -226,8 +226,16 @@ button[data-action="send"]  { --action-bg: #136957; --action-text: #fff; --actio
   }
 }
 
-#groupPanel > summary { cursor: pointer; }
-.group-line-tools { margin: .8rem 0; }
-#groupList { display: flex; flex-wrap: wrap; gap: .45rem; }
-#groupList button[aria-pressed="true"] { background: #e4f0ec; border-color: #91bbaa; }
-#groupConversation { margin-top: .8rem; }
+.line-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem;
+  margin-bottom: 1rem;
+}
+.line-tabs [role="tab"][aria-selected="true"] {
+  color: #fff;
+  background: #136957;
+  border-color: #136957;
+}
+#groupSummary { margin-top: .8rem; }
+#groupHistory:not(:empty) { margin-bottom: .75rem; }

@@ -509,25 +509,55 @@ window.salesDesk={
     $('overviewNotes').classList.toggle('hidden',!notes.children.length);
   }
 };
+const lineTabs=[$('directTab'),$('groupTab')];
+function activateLineTab(tab){
+  for(const button of lineTabs){
+    const active=button===tab;
+    button.setAttribute('aria-selected',String(active));
+    button.tabIndex=active?0:-1;
+    $(button.getAttribute('aria-controls')).classList.toggle('hidden',!active);
+  }
+}
+for(const tab of lineTabs){
+  tab.onclick=()=>activateLineTab(tab);
+  tab.onkeydown=event=>{
+    if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;
+    event.preventDefault();
+    const next=event.key==='Home'?lineTabs[0]:event.key==='End'?lineTabs[1]:lineTabs.find(button=>button!==tab);
+    activateLineTab(next);
+    next.focus();
+  };
+}
 let activeGroup=null, groupLoaded=false;
 function clearGroupConversation(){
   activeGroup=null;
   groupLoaded=false;
-  $('groupConversation').hidden=true;
+  $('groupName').textContent='グループを選んでください';
+  $('groupHistoryStatus').textContent='';
   $('groupHistory').replaceChildren();
   $('groupSummary').replaceChildren();
 }
-async function openGroup(group,button){
+function selectGroup(group,button){
   if(busy)return;
-  const scope=window.salesDeskScope?.();
   clearGroupConversation();
   activeGroup=group.id;
   $('groupName').textContent=group.title;
-  $('groupConversation').hidden=false;
-  for(const item of $('groupList').children)item.setAttribute('aria-pressed',String(item===button));
-  $('groupStatus').textContent='会話を取得中…';
+  for(const item of $('groupList').children){
+    const current=item===button;
+    item.classList.toggle('selected',current);
+    item.setAttribute('aria-pressed',String(current));
+  }
+  controls();
+}
+$('loadGroupHistory').onclick=async()=>{
+  if(busy||!activeGroup)return;
+  const scope=window.salesDeskScope?.();
+  groupLoaded=false;
+  $('groupHistory').replaceChildren();
+  $('groupSummary').replaceChildren();
+  $('groupHistoryStatus').textContent='会話を取得中…';
   try{
-    const result=await request('conversation',{chat_id:group.id,group:true});
+    const result=await request('conversation',{chat_id:activeGroup,group:true});
     if(scope!==window.salesDeskScope?.())return;
     for(const message of result.messages){
       const row=make('div',message.text);
@@ -536,11 +566,11 @@ async function openGroup(group,button){
       $('groupHistory').append(row);
     }
     groupLoaded=result.messages.length>0;
-    $('groupStatus').textContent=groupLoaded?'':'表示できるテキストはありません。';
+    $('groupHistoryStatus').textContent=groupLoaded?'':'表示できるテキストはありません。';
   }catch(error){
-    if(scope===window.salesDeskScope?.())$('groupStatus').textContent=error.message;
+    if(scope===window.salesDeskScope?.())$('groupHistoryStatus').textContent=error.message;
   }finally{controls();}
-}
+};
 $('loadGroups').onclick=async()=>{
   if(busy)return;
   const scope=window.salesDeskScope?.();
@@ -552,20 +582,22 @@ $('loadGroups').onclick=async()=>{
     const buttons=result.chats.map(group=>{
       const button=make('button',group.title);
       button.type='button';
+      button.className='chat-button';
+      button.append(make('span',date(group.updated)));
       button.setAttribute('aria-pressed','false');
-      button.onclick=()=>openGroup(group,button);
+      button.onclick=()=>selectGroup(group,button);
       return button;
     });
     $('groupList').replaceChildren(...buttons);
     $('groupStatus').textContent=buttons.length?'':'グループLINEが見つかりませんでした。';
   }catch(error){
     if(scope===window.salesDeskScope?.())$('groupStatus').textContent=error.message;
-  }
+  }finally{controls();}
 };
 $('groupSummaryButton').onclick=async()=>{
   if(busy||!groupLoaded)return;
   const scope=window.salesDeskScope?.();
-  $('groupStatus').textContent='Macで要点を整理中…';
+  $('groupHistoryStatus').textContent='Macで要点を整理中…';
   try{
     const {summary}=await request('conversation',{chat_id:activeGroup,group:true,summarize:true});
     if(scope!==window.salesDeskScope?.())return;
@@ -574,9 +606,9 @@ $('groupSummaryButton').onclick=async()=>{
       list.append(make('dt',label),make('dd',summary[key]));
     }
     $('groupSummary').replaceChildren(list);
-    $('groupStatus').textContent='';
+    $('groupHistoryStatus').textContent='';
   }catch(error){
-    if(scope===window.salesDeskScope?.())$('groupStatus').textContent=error.message;
+    if(scope===window.salesDeskScope?.())$('groupHistoryStatus').textContent=error.message;
   }
 };
 controls=function(){
@@ -596,6 +628,7 @@ controls=function(){
   $('chatOverview').classList.toggle('hidden',!selected);
   $('loadChats').disabled||=syncing;
   $('loadGroups').disabled=busy;
+  $('loadGroupHistory').disabled=busy||!activeGroup;
   $('groupSummaryButton').disabled=busy||!groupLoaded;
   for(const button of $('groupList').children)button.disabled=busy;
   $('pinChat').disabled=busy||syncing||!selected;
