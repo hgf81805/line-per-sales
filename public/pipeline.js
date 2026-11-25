@@ -32,7 +32,7 @@ function render(){
       const member=members.find(m=>m.id===deal.owner_id);
       card.append(element('p','担当：'+(member?.name||'未設定'),'muted'));
       const date=new Date(deal.stage_since);
-      if(deal.stage_since&&!Number.isNaN(date.getTime()))card.append(element('p','工程に入った日：'+date.toLocaleDateString('ja-JP'),'muted'));
+      if(deal.stage_since&&!Number.isNaN(date.getTime()))card.append(element('p','工程に入った日：'+date.toLocaleDateString('ja-JP',{timeZone:'Asia/Tokyo'}),'muted'));
       if(typeof deal.value==='number'){
         let value;try{value=new Intl.NumberFormat('ja-JP',{style:'currency',currency:deal.currency||'USD'}).format(deal.value);}catch(e){value=String(deal.value);}
         card.append(element('p',value));
@@ -57,7 +57,7 @@ async function load(append=false){
     deals=[...combined.values()];members=data.members;stages=data.stages;loaded=true;more=data.has_more;nextOffset=offset+data.deals.length;
     const previous=$('boardOwner').value;$('boardOwner').replaceChildren();const all=element('option','すべての担当者');all.value='';$('boardOwner').append(all);
     for(const member of members){const option=element('option',member.name);option.value=member.id;$('boardOwner').append(option);}if(members.some(m=>m.id===previous))$('boardOwner').value=previous;
-    $('boardSummary').textContent=(data.profile.workspace_name||'Attio')+' · 最終取得 '+new Date().toLocaleString('ja-JP');render();
+    $('boardSummary').textContent=(data.profile.workspace_name||'Attio')+' · 最終取得 '+new Date().toLocaleString('ja-JP',{timeZone:'Asia/Tokyo'});render();
   }catch(e){if(current===epoch){$('error').textContent=e.message;$('boardNotice').textContent=loaded?'更新できませんでした。前回取得した案件を表示しています。':'案件を取得できませんでした。Macの接続とAttio設定を確認してください。';}}
   finally{loading=false;controls();window.dispatchEvent(new Event('pipelineupdated'));}
 }

@@ -30,10 +30,10 @@ function showLinked(){
   if(![...$('attioDeal').options].some(o=>o.value===deal.id)){const option=document.createElement('option');option.value=deal.id;option.textContent=deal.name;$('attioDeal').appendChild(option);}
   $('attioDeal').value=deal.id;$('attioStage').value=deal.stage_id;
   if(deal.owner_id)$('attioOwner').value=deal.owner_id;
-  $('attioDealInfo').textContent=deal.name+' · '+deal.stage+(deal.stage_since?' · 工程に入った日：'+new Date(deal.stage_since).toLocaleDateString('ja-JP'):'');
+  $('attioDealInfo').textContent=deal.name+' · '+deal.stage+(deal.stage_since?' · 工程に入った日：'+new Date(deal.stage_since).toLocaleDateString('ja-JP',{timeZone:'Asia/Tokyo'}):'');
   const href=safeAttioURL(deal.url);$('attioOpen').classList.toggle('hidden',!href);if(href)$('attioOpen').href=href;
   for(const task of linked.tasks||[]){
-    const row=document.createElement('div');row.className='message';const text=document.createElement('span');text.textContent=task.content+(task.deadline?'（期限：'+new Date(task.deadline).toLocaleString('ja-JP')+'）':'');row.appendChild(text);
+    const row=document.createElement('div');row.className='message';const text=document.createElement('span');text.textContent=task.content+(task.deadline?'（期限：'+new Date(task.deadline).toLocaleString('ja-JP',{timeZone:'Asia/Tokyo'})+'）':'');row.appendChild(text);
     const button=document.createElement('button');button.textContent='完了にする';button.dataset.attioTask=task.id;button.onclick=()=>completeTask(task);row.appendChild(button);$('attioTasks').appendChild(row);
   }
   if(!linked.tasks?.length)$('attioTasks').textContent='未完了の次アクションはありません。';manageControls();
@@ -77,7 +77,7 @@ handler('attioStageSave',async()=>{
 });
 handler('attioTaskCreate',async()=>{
   const deal=linked?.deal,content=$('attioTaskText').value.trim(),owner_id=$('attioOwner').value;
-  const date=$('attioDeadline').value,deadline=date?new Date(date).toISOString():null;
+  const date=$('attioDeadline').value,deadline=date?new Date(date+'+09:00').toISOString():null;
   if(!deal||!confirm('Attioの「'+deal.name+'」に次アクションを登録しますか？\n'+content+'\n担当者：'+$('attioOwner').selectedOptions[0].textContent+'\n期限：'+(date||'未設定')))return;
   await write('task',{deal_id:deal.id,owner_id,content,deadline});$('attioTaskText').value='';await refresh();note('次アクションを登録しました。');
 });

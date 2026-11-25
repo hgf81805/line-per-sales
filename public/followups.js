@@ -27,7 +27,7 @@ if($('postSendFollowup')){
   });
   function showDate(){
     const when=plan?.dates[$('postFollowDays').value];
-    $('postFollowDate').textContent=when?'期限 '+jst(when)+'（日本時間）':'';
+    $('postFollowDate').textContent=when?'期限 '+jst(when):'';
   }
   $('openPostFollow').onclick=async()=>{
     if(busy||saving||!receipt)return;

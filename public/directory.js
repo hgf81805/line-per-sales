@@ -27,7 +27,7 @@ function render(){
         ['電話番号',record.phones?.join(' / ')],
         ['役職',record.job_title],
         ['紹介・説明',record.description],
-        ['Attio登録日時',date&&!Number.isNaN(date.getTime())?date.toLocaleString('ja-JP'):null]
+        ['Attio登録日時',date&&!Number.isNaN(date.getTime())?date.toLocaleString('ja-JP',{timeZone:'Asia/Tokyo'}):null]
       ];
       for(const [label,value] of fields){
         if(value)info.append(node('dt',label),node('dd',value));
@@ -73,7 +73,7 @@ function render(){
     }
     if(record.fetched_at){
       const timestamp=new Date(record.fetched_at);
-      if(!Number.isNaN(timestamp.getTime()))card.append(node('p','Attioからの最終取得 '+timestamp.toLocaleString('ja-JP')));
+      if(!Number.isNaN(timestamp.getTime()))card.append(node('p','Attioからの最終取得 '+timestamp.toLocaleString('ja-JP',{timeZone:'Asia/Tokyo'})));
     }
     try{const url=new URL(record.url);if(url.protocol==='https:'&&url.hostname==='app.attio.com'){const link=node('a','Attioで開く ↗');link.href=url.href;link.target='_blank';link.rel='noopener noreferrer';card.append(link);}}catch(e){}
     $('directoryCards').append(card);
