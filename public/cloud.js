@@ -210,7 +210,11 @@ $('cloudLogin').onsubmit=async event=>{
   const email=$('cloudEmail').value.trim(),password=$('cloudPassword').value;
   try{
     if(local){await localRequest('cloud/enroll',{email,password});$('cloudPassword').value='';await localStatus();}
-    else{saveSession(await raw('/auth/v1/token?grant_type=password',{email,password},{auth:false}));$('cloudPassword').value='';await loggedIn();}
+    else{saveSession(await raw('/auth/v1/token?grant_type=password',{email,password},{auth:false}));
+      try{
+        if($('cloudRememberEmail')?.checked)localStorage.setItem('line-login-email',email);
+        else localStorage.removeItem('line-login-email');
+      }catch{}$('cloudPassword').value='';await loggedIn();}
   }catch(e){notice(e.message);}finally{button.disabled=false;}
 };
 $('cloudSignup').onclick=async()=>{
@@ -254,6 +258,12 @@ async function initialize(){
     const response=await fetch('/cloud-config.json',{cache:'no-store'});config=await response.json();
     if(!/^https:\/\/[a-z0-9]+\.supabase\.co$/.test(config.url)||!config.key.startsWith('sb_publishable_'))throw new Error('クラウド設定を確認してください。');
     panel?.classList.remove('hidden');
+    if($('cloudRememberEmail')){
+      $('cloudRememberEmailLabel').hidden=local;
+      if(!local&&!$('cloudEmail').value){
+        try{$('cloudEmail').value=localStorage.getItem('line-login-email')||'';}catch{}
+      }
+    }
     if(local&&panel){$('cloudTitle').textContent='スマホ・別PCから使うための設定';$('cloudLoginButton').textContent='ログインしてこのMacを登録';$('cloudSignup').classList.add('hidden');await localStatus();deviceTimer=setInterval(()=>localStatus().catch(e=>notice(e.message)),15000);}
     else if(!local){try{session=JSON.parse(sessionStorage.getItem(storageKey));}catch(e){}if(session){await accessToken();await loggedIn();}}
   }catch(e){notice(e.message);}
