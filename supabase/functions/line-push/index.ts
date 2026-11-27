@@ -70,6 +70,7 @@ Deno.serve(async req=>{
     return reply(await deliverPush(service,userId,eventId,{
       body:isTest?'プッシュ通知を受信できました。':isLine?'LINEに新着メッセージがあります。':'期限またはLINEの返信を確認してください。',
       path:isLine?'/#direct-line':'/pipeline.html#today-agenda',
+      sender:isLine?data.sender:undefined,
     },isTest?data.endpoint:undefined));
   }catch{return reply({error:'通知の処理ができませんでした。時間をおいて再試行してください。'},500);}
 });

@@ -24,8 +24,9 @@ self.addEventListener('push', event=>{
   try{payload=event.data.json();}catch{}
   const path=notificationPath(payload.path);
   const notification=lineNotifications[path];
+  const sender=typeof payload.sender==='string'?payload.sender.trim():'';
   event.waitUntil(self.registration.showNotification(notification?.title||'つながる営業',{
-    body:notification?.body||payload.body||'営業フォローを確認してください。',
+    body:notification&&sender?sender+'さんからメッセージが届きました。':notification?.body||payload.body||'営業フォローを確認してください。',
     icon:'/apple-touch-icon.png',
     tag:notification?.tag||'line-sales-followup',
     data:{path}

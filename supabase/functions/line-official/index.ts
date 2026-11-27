@@ -49,16 +49,17 @@ async function tokenHash(token:string){
   const hash=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(token));
   return Array.from(new Uint8Array(hash),byte=>byte.toString(16).padStart(2,'0')).join('');
 }
-async function notifyOfficial(ownerId:string,accountId:string,messageId:string,received:number){
+async function notifyOfficial(ownerId:string,accountId:string,messageId:string,received:number,getSender:()=>Promise<string|undefined>){
   if(Date.now()-received>15*60*1000)return;
   const eventId=await tokenHash(JSON.stringify(['official-line',accountId,messageId]));
   await deliverPush(service,ownerId,eventId,{
     body:'公式LINEに新着メッセージがあります。',
     path:'/#official-line',
+    sender:await getSender(),
   });
 }
-function scheduleNotification(ownerId:string,accountId:string,messageId:string,received:number){
-  const task=notifyOfficial(ownerId,accountId,messageId,received).catch(()=>{
+function scheduleNotification(ownerId:string,accountId:string,messageId:string,received:number,getSender:()=>Promise<string|undefined>){
+  const task=notifyOfficial(ownerId,accountId,messageId,received,getSender).catch(()=>{
     console.error('Official LINE push delivery failed');
   });
   const runtime=(globalThis as typeof globalThis & {EdgeRuntime?:{waitUntil(promise:Promise<unknown>):void}}).EdgeRuntime;
@@ -86,7 +87,7 @@ async function importMail(req:Request,raw:ArrayBuffer){
     p_at:new Date(received).toISOString(),p_name:displayName.slice(0,100),p_reply_url:parsed?.link||null,
   });
   check(result.error);
-  await scheduleNotification(importer.data.owner_id,account,id,received);
+  await scheduleNotification(importer.data.owner_id,account,id,received,async()=>parsed?.sender);
   return reply({accepted:true});
 }
 async function signatureMatches(signature:string, raw:ArrayBuffer, secret:string):Promise<boolean>{
@@ -94,6 +95,20 @@ async function signatureMatches(signature:string, raw:ArrayBuffer, secret:string
   const key = await crypto.subtle.importKey('raw',new TextEncoder().encode(secret),
     {name:'HMAC',hash:'SHA-256'},false,['verify']);
   return crypto.subtle.verify('HMAC',key,Uint8Array.from(atob(signature),c=>c.charCodeAt(0)),raw);
+}
+async function readLineSender(account:Account,id:string):Promise<string|undefined>{
+  try{
+    const saved=await threads().select('display_name').eq('account_id',account.id).eq('line_user',id).maybeSingle();
+    if(saved.data?.display_name)return saved.data.display_name;
+    const profile=await fetch('https://api.line.me/v2/bot/profile/'+id,{signal:AbortSignal.timeout(2500),
+      headers:{Authorization:'Bearer '+account.access_token}});
+    if(!profile.ok)return;
+    const data=await profile.json();
+    if(typeof data.displayName!=='string'||!data.displayName.trim())return;
+    const name=data.displayName.trim().slice(0,100);
+    await threads().update({display_name:name}).eq('account_id',account.id).eq('line_user',id).is('display_name',null);
+    return name;
+  }catch{return undefined;}
 }
 async function webhook(req:Request,raw:ArrayBuffer){
   const accounts=configuredAccounts();
@@ -118,7 +133,7 @@ async function webhook(req:Request,raw:ArrayBuffer){
       p_account:account.id,p_user:event.source.userId,p_id:event.message.id,p_body:body,p_at:new Date(event.timestamp).toISOString(),
     });
     check(accepted.error);
-    await scheduleNotification(account.owner_id,account.id,event.message.id,event.timestamp);
+    await scheduleNotification(account.owner_id,account.id,event.message.id,event.timestamp,()=>readLineSender(account,event.source.userId));
   }
   return reply({ok:true});
 }
@@ -199,19 +214,7 @@ Deno.serve(async req=>{
     if(!thread.data)return problem('問い合わせが見つかりません。',404);
     if(data.action==='history'){
       let displayName=thread.data.display_name;
-      if(!displayName&&!isMail){
-        try{
-          const profile=await fetch('https://api.line.me/v2/bot/profile/'+id,{signal:AbortSignal.timeout(2500),
-            headers:{Authorization:'Bearer '+account.access_token}});
-          if(profile.ok){
-            const profileData=await profile.json();
-            if(typeof profileData.displayName==='string'&&profileData.displayName.trim()){
-              displayName=profileData.displayName.trim().slice(0,100);
-              check((await threads().update({display_name:displayName}).eq('account_id',account.id).eq('line_user',id)).error);
-            }
-          }
-        }catch{/* History can still be displayed. */}
-      }
+      if(!displayName&&!isMail)displayName=await readLineSender(account,id)??null;
       const result=await messages().select('direction,body,created_at').eq('account_id',account.id).eq('line_user',id).eq('sent',true)
         .order('created_at',{ascending:false}).limit(50);
       check(result.error);

@@ -65,7 +65,7 @@ def activity_time(value):
 
 
 def unread_line_events(token, since, hidden_chats=()):
-    """Yield only hashes and timestamps for recent incoming LINE messages."""
+    """Yield hashes, timestamps and available sender names for recent LINE messages."""
     cursor = None
     seen = set()
     for _ in range(3):
@@ -96,7 +96,10 @@ def unread_line_events(token, since, hidden_chats=()):
                     and not message.get('isHidden') and message.get('type') in
                     (None,'TEXT','IMAGE','VIDEO','AUDIO','VOICE','FILE','STICKER','LOCATION')):
                     digest = hashlib.sha256(json.dumps(['line-incoming',cid,mid]).encode()).hexdigest()
-                    yield digest, stamp
+                    sender = message.get('senderName')
+                    if (not isinstance(sender, str) or not sender.strip()) and chat['type']=='single':
+                        sender = chat.get('title')
+                    yield digest, stamp, sender.strip()[:80] if isinstance(sender, str) else ''
                     break
         cursor = page.get('oldestCursor') if page.get('hasMore') else None
         if not cursor or cursor in seen:

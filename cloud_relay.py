@@ -134,12 +134,12 @@ class CloudRelay:
                 else:
                     cutoff=max(active_since, now-120)
                     delivered={event:stamp for event,stamp in delivered.items() if stamp>=cutoff}
-                    for event, stamp in self.line_events(cutoff, self.silenced_line_chats()):
+                    for event, stamp, sender in self.line_events(cutoff, self.silenced_line_chats()):
                         if self.stop_event.is_set():
                             return
                         if event in delivered:
                             continue
-                        self.http(endpoint,{'action':'publish','kind':'line','event_id':event})
+                        self.http(endpoint,{'action':'publish','kind':'line','event_id':event,'sender':sender})
                         delivered[event]=stamp
             except (RuntimeError, ValueError, OSError):
                 # Retry on the next pass without interrupting the connector.
