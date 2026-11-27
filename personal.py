@@ -270,7 +270,7 @@ def make_handler(token, port, cloud=None, sender=None, attio=None, chat_index=No
                         for row in rows:
                             if (not isinstance(row,dict) or set(row)-{'chat_id','kind','active','title','deferred_at','return_on'}
                                 or not {'chat_id','kind','active','title'}<=set(row)
-                                or row['kind'] not in ('pin','hide','later','lead') or type(row['active']) is not bool
+                                or row['kind'] not in ('pin','hide','later','lead','mute') or type(row['active']) is not bool
                                 or not isinstance(row['chat_id'],str) or not 1 <= len(row['chat_id']) <= 256
                                 or not isinstance(row['title'],str) or len(row['title']) > 200):
                                 raise ValueError('invalid preference')

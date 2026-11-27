@@ -15,6 +15,22 @@ function stored(type,scope=window.salesDeskScope?.()){
   }catch{return [];}
 }
 const groupPrefix='group:';
+function mutedChats(){
+  return new Set(synchronized ? synchronized.filter(row=>row.kind==='mute').map(row=>row.chat_id) : stored('muted').map(row=>row.id));
+}
+async function setChatMute(ids, muted, group){
+  if(!ids.length||busy||syncing)return;
+  const status=$(group?'groupStatus':'chatFilterStatus');
+  if(ids.some(id=>id.length>256)){
+    status.textContent='このトークの通知設定を保存できません。';
+    return;
+  }
+  if(await updatePreferences('mute',ids.map(id=>({id})),muted)){
+    status.textContent=ids.length+'件の通知を'+(muted?'オフ':'オン')+'にしました。';
+  }else if(group){
+    status.textContent=$('chatFilterStatus').textContent;
+  }
+}
 function pins(includeGroups=false){
   const rows=synchronized ? synchronized.filter(row=>row.kind==='pin').map(row=>row.chat_id) : stored('pins');
   return rows.filter(id=>id.startsWith(groupPrefix)===includeGroups);
@@ -141,7 +157,7 @@ async function syncPreferences(changes=[]){
     if(changes.length){
       const isPin=changes[0].kind==='pin';
       const isLater=changes[0].kind==='later';
-      const key=isPin?'pins':isLater?'later':changes[0].kind==='lead'?'lead':'hidden';
+      const key=isPin?'pins':isLater?'later':changes[0].kind==='lead'?'lead':changes[0].kind==='mute'?'muted':'hidden';
       const ids=new Set(changes.map(row=>row.chat_id));
       const kept=stored(key,scope).filter(row=>!ids.has(isPin?row:isLater?row.chat_id:row.id));
       for(const change of changes)if(change.active)kept.push(isPin?change.chat_id:isLater?change:{id:change.chat_id,title:change.title});
@@ -153,6 +169,7 @@ async function syncPreferences(changes=[]){
   const oldHidden=stored('hidden',scope).filter(row=>typeof row?.id==='string'&&row.id.length>0&&row.id.length<=256);
   const imported=[
     ...stored('later',scope),
+    ...stored('muted',scope).map(({id})=>({chat_id:id,title:'',kind:'mute',active:true})),
     ...stored('lead',scope).map(({id,title})=>({chat_id:id,title,kind:'lead',active:true})),
     ...oldPins.map(chat_id=>({chat_id,kind:'pin',active:true,title:''})),
     ...oldHidden.map(({id,title})=>({chat_id:id,kind:'hide',active:true,title:String(title||'トーク').slice(0,200)}))
@@ -167,6 +184,7 @@ async function syncPreferences(changes=[]){
     localStorage.removeItem('line-sales-hidden:'+scope);
     localStorage.removeItem('line-sales-later:'+scope);
     localStorage.removeItem('line-sales-lead:'+scope);
+    localStorage.removeItem('line-sales-muted:'+scope);
   }
   if(scope!==window.salesDeskScope?.())throw new Error('接続が変わりました。');
   for(let i=0;i<changes.length;i+=8){
@@ -198,6 +216,7 @@ function updateBatchControls(){
   $('laterRestoreSelected').disabled=busy||syncing||!laterSelection.size;
   $('leadRestoreCount').textContent=leadSelection.size+'件選択';
   $('leadRestoreSelected').disabled=busy||syncing||!leadSelection.size;
+  updateMuteButtons();
   $('chatBatchLead').disabled=busy||syncing||!hideSelection.size;
   $('chatBatchLater').disabled=busy||syncing||!hideSelection.size;
   $('chatBatchLaterSave').disabled=busy||syncing||!hideSelection.size;
@@ -265,6 +284,33 @@ for(const kind of ['direct','group']){
     window.scrollTo(0,listPosition.get(kind)||0);
   };
 }
+function makeMuteButton(record,isGroup){
+  const button=make('button','🔔');
+  button.type='button';
+  button.className='chat-mute-button';
+  button.dataset.muteId=isGroup?groupPrefix+record.id:record.id;
+  button.dataset.chatTitle=record.title;
+  button.onclick=()=>setChatMute([button.dataset.muteId],!mutedChats().has(button.dataset.muteId),isGroup);
+  return button;
+}
+function updateMuteButtons(){
+  const muted=mutedChats();
+  for(const button of document.querySelectorAll('[data-mute-id]')){
+    const off=muted.has(button.dataset.muteId);
+    button.textContent=off?'🔕':'🔔';
+    button.setAttribute('aria-label',button.dataset.chatTitle+'の通知をオフ');
+    button.setAttribute('aria-pressed',String(off));
+    button.title=off?'通知をオン':'通知をオフ';
+    button.disabled=busy||syncing;
+  }
+  for(const button of document.querySelectorAll('[data-mute-batch]')){
+    const group=button.dataset.muteBatch==='group';
+    const parked=group&&['lead','later','hide'].includes($('groupFilter').value);
+    const size=group?groupSelection.size:hideSelection.size;
+    button.hidden=parked;
+    button.disabled=busy||syncing||!size;
+  }
+}
 function withQuickActions(button,record,isGroup){
   const row=make('div','');
   row.className='mobile-chat-row';
@@ -295,7 +341,7 @@ function withQuickActions(button,record,isGroup){
     for(const other of document.querySelectorAll('.mobile-chat-actions[open]'))if(other!==actions)other.open=false;
   };
   actions.append(toggle,menu);
-  row.append(button,actions);
+  row.append(button,makeMuteButton(record,isGroup),actions);
   return row;
 }
 function choose(chat,fromLead=false){
@@ -641,6 +687,7 @@ function renderGroups(){
   updateGroupControls();
 }
 function updateGroupControls(){
+  updateMuteButtons();
   const canReply=Boolean(groupVersion)&&!busy&&!groupLocked;
   for(const shelf of groupShelves){
     shelf.restore.disabled=busy||syncing||!shelf.selection.size;
@@ -943,5 +990,12 @@ controls=function(){
   $('chatFilter').disabled=busy;
   $('chatSearchForm').querySelector('button').disabled=busy||syncing;
 };
+for(const button of document.querySelectorAll('[data-mute-batch]')){
+  button.onclick=()=>{
+    const group=button.dataset.muteBatch==='group';
+    const ids=group?[...groupSelection].map(id=>groupPrefix+id):[...hideSelection];
+    setChatMute(ids,button.dataset.muteValue==='off',group);
+  };
+}
 controls();
 })();

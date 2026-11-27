@@ -356,3 +356,20 @@ button[data-action="send"]  { --action-bg: #136957; --action-text: #fff; --actio
     border-color: #9ab7ab;
   }
 }
+
+.line-workspace .mobile-chat-row { display: flex; align-items: flex-start; gap: .35rem; }
+.mobile-chat-row > .chat-button { flex: 1; min-width: 0; }
+.line-workspace .chat-mute-button {
+  min-width: 36px;
+  min-height: 36px;
+  padding-inline: .25rem;
+  background: #edf4f8;
+  border-color: #bfd5e5;
+}
+.line-workspace .chat-mute-button[aria-pressed="true"] {
+  background: #f8edef;
+  border-color: #d6a4af;
+}
+@media (max-width: 760px) {
+  .line-workspace .chat-mute-button { min-height: 44px; }
+}

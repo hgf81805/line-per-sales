@@ -107,16 +107,16 @@ class CloudRelay:
             self.line_push_worker=threading.Thread(target=self.push_line_messages,daemon=True)
             self.line_push_worker.start()
 
-    def hidden_line_chats(self):
-        hidden = set()
+    def silenced_line_chats(self):
+        silenced = set()
         offset = 0
         while True:
             rows = self.http('/rest/v1/line_chat_preferences'
-                             '?select=chat_id&active=eq.true&kind=eq.hide'
-                             f'&order=chat_id&limit=100&offset={offset}', method='GET')
-            hidden.update(row['chat_id'] for row in rows)
+                             '?select=chat_id&active=eq.true&kind=in.(hide,mute)'
+                             f'&order=kind,chat_id&limit=100&offset={offset}', method='GET')
+            silenced.update(row['chat_id'] for row in rows)
             if len(rows) < 100:
-                return hidden
+                return silenced
             offset += len(rows)
 
     def push_line_messages(self):
@@ -134,7 +134,7 @@ class CloudRelay:
                 else:
                     cutoff=max(active_since, now-120)
                     delivered={event:stamp for event,stamp in delivered.items() if stamp>=cutoff}
-                    for event, stamp in self.line_events(cutoff, self.hidden_line_chats()):
+                    for event, stamp in self.line_events(cutoff, self.silenced_line_chats()):
                         if self.stop_event.is_set():
                             return
                         if event in delivered:
