@@ -2,6 +2,7 @@
 'use strict';
 const main=document.querySelector('main');
 const inbox=$('official-line');
+const officialActive=()=>location.hash!=='#direct-line';
 const templates={
   consult:'お問い合わせありがとうございます。ご相談内容と、ご都合のよい日時をいくつか教えていただけますか？',
   price:'お問い合わせありがとうございます。料金をご案内しますので、ご希望の内容やご利用予定を教えていただけますか？',
@@ -59,14 +60,14 @@ $('officialLoginForm').onsubmit=async event=>{
     await window.lineOfficialLogin($('officialLoginEmail').value.trim(),password.value);
     password.value='';
     $('officialAuthStatus').textContent='';
-    if(location.hash==='#official-line'&&showOfficialAccess())load();
+    if(officialActive()&&showOfficialAccess())load();
   }catch(error){
     password.value='';
     $('officialAuthStatus').textContent=error.message;
   }finally{button.disabled=false;}
 };
 window.addEventListener('connectionchange',()=>{
-  if(location.hash==='#official-line'&&!window.lineOfficialSignedIn?.()){
+  if(officialActive()&&!window.lineOfficialSignedIn?.()){
     viewGeneration++;
     accounts=[];accountId=null;
     $('officialMailKeyPanel').hidden=true;
@@ -77,17 +78,20 @@ window.addEventListener('connectionchange',()=>{
   }
 });
 function switchView(){
-  const active=location.hash==='#official-line';
+  const active=officialActive();
   viewGeneration++;
   main.classList.toggle('official-view',active);
   inbox.classList.toggle('hidden',!active);
+  $('officialNav').toggleAttribute('aria-current',active);
+  $('directNav').toggleAttribute('aria-current',!active);
+  (active?$('officialNav'):$('directNav')).setAttribute('aria-current','page');
   if(active){
     accounts=[];accountId=null;
     $('officialMailKeyPanel').hidden=true;
     $('officialMailKey').value='';
     $('officialAccount').replaceChildren();
     resetInbox();
-    Promise.resolve(window.lineCloudReady).then(()=>{if(location.hash==='#official-line'&&showOfficialAccess())load();});
+    Promise.resolve(window.lineCloudReady).then(()=>{if(officialActive()&&showOfficialAccess())load();});
   }else if($('officialDialog').open)$('officialDialog').close();
 }
 function time(value){return new Date(value).toLocaleString('ja-JP',{timeZone:'Asia/Tokyo'});}
@@ -280,5 +284,5 @@ $('officialSend').onclick=()=>run(async valid=>{
   try{await history(row,valid);}catch{/* The message was already accepted. */}
 },sendStatus);
 window.addEventListener('hashchange',switchView);
-if(location.hash==='#official-line')switchView();
+switchView();
 })();
