@@ -1,3 +1,4 @@
+import {deliverPush} from '../_shared/push-delivery.ts';
 import {parseLstepMail} from './lstep-mail.ts';
 import {createClient} from 'npm:@supabase/supabase-js@2.49.4';
 
@@ -48,10 +49,26 @@ async function tokenHash(token:string){
   const hash=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(token));
   return Array.from(new Uint8Array(hash),byte=>byte.toString(16).padStart(2,'0')).join('');
 }
+async function notifyOfficial(ownerId:string,accountId:string,messageId:string,received:number){
+  if(Date.now()-received>15*60*1000)return;
+  const eventId=await tokenHash(JSON.stringify(['official-line',accountId,messageId]));
+  await deliverPush(service,ownerId,eventId,{
+    body:'公式LINEに新着メッセージがあります。',
+    path:'/#official-line',
+  });
+}
+function scheduleNotification(ownerId:string,accountId:string,messageId:string,received:number){
+  const task=notifyOfficial(ownerId,accountId,messageId,received).catch(()=>{
+    console.error('Official LINE push delivery failed');
+  });
+  const runtime=(globalThis as typeof globalThis & {EdgeRuntime?:{waitUntil(promise:Promise<unknown>):void}}).EdgeRuntime;
+  if(runtime)runtime.waitUntil(task);
+  else return task;
+}
 async function importMail(req:Request,raw:ArrayBuffer){
   const token=req.headers.get('x-lstep-import')||'';
   if(!/^[0-9a-f]{64}$/.test(token))return problem('取り込みキーが無効です。',401);
-  const importer=await imports().select('id,mailbox').eq('token_hash',await tokenHash(token)).maybeSingle();
+  const importer=await imports().select('id,mailbox,owner_id').eq('token_hash',await tokenHash(token)).maybeSingle();
   check(importer.error);
   if(!importer.data)return problem('取り込みキーが無効です。',401);
   const {id,subject,body,received_at,mailbox}=JSON.parse(new TextDecoder().decode(raw));
@@ -69,6 +86,7 @@ async function importMail(req:Request,raw:ArrayBuffer){
     p_at:new Date(received).toISOString(),p_name:displayName.slice(0,100),p_reply_url:parsed?.link||null,
   });
   check(result.error);
+  await scheduleNotification(importer.data.owner_id,account,id,received);
   return reply({accepted:true});
 }
 async function signatureMatches(signature:string, raw:ArrayBuffer, secret:string):Promise<boolean>{
@@ -100,6 +118,7 @@ async function webhook(req:Request,raw:ArrayBuffer){
       p_account:account.id,p_user:event.source.userId,p_id:event.message.id,p_body:body,p_at:new Date(event.timestamp).toISOString(),
     });
     check(accepted.error);
+    await scheduleNotification(account.owner_id,account.id,event.message.id,event.timestamp);
   }
   return reply({ok:true});
 }
