@@ -69,7 +69,7 @@ def unread_line_events(token, since):
     cursor = None
     seen = set()
     for _ in range(3):
-        params = {'type':'any', 'unreadOnly':'true', 'limit':50}
+        params = {'type':'any', 'unreadOnly':'true', 'includeMuted':'false', 'limit':50}
         if cursor:
             params.update(cursor=cursor, direction='before')
         page = http_json(BEEPER_URL+'/v1/chats/search?'+urlencode(params), token=token)

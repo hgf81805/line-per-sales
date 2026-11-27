@@ -145,8 +145,8 @@ class CloudRelay:
                     while offset is not None and not self.stop_event.is_set():
                         page=self.dispatch('sales-assist',{'mode':'agenda','offset':offset})
                         for row in page['items']:
-                            if row['kind'] in ('today','overdue','reply') and row.get('task'):
-                                events.add((row['task']['id'],row['kind'],row['reply']))
+                            if row['kind'] in ('today','overdue') and row.get('task'):
+                                events.add((row['task']['id'],row['kind']))
                         next_offset=page['next_offset']
                         if next_offset is not None and next_offset<=offset:
                             break
