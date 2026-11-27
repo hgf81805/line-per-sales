@@ -125,3 +125,14 @@ Mac内の画面でリモート接続へログインしている必要があり�
 一時ジョブは従来どおり取得後に削除しますが、このテーブルのデータは明示的に削除するまで継続保存します。Attioから削除されたレコードも、保存済みのスナップショットを自動削除しません。オフライン時にこの保存データへ自動切り替えする機能はありません。保存に失敗した場合は一覧表示を維持し、画面に失敗を表示します。接続を直して再取得すると保存を再試行します。
 
 スキーマは `supabase/attio-store.sql`、本人分離・匿名拒否・重複防止・項目制限の検証は `supabase/tests/attio_store_rls.sql` にあります。
+
+## 公式LINEの受信箱
+
+公式LINEは、Web版の「公式LINE」から開きます。接続先は1チャネルで、担当者を既存のSupabaseログイン1件に指定します。
+
+1. 公式アカウントでMessaging APIを有効にします。
+2. SupabaseのEdge Function Secretsに `LINE_OFFICIAL_CHANNEL_SECRET`、`LINE_OFFICIAL_CHANNEL_ACCESS_TOKEN`、`LINE_OFFICIAL_OWNER_ID`（担当者のSupabase AuthenticationユーザーID）を登録します。値はGitHubやブラウザー用設定に含めないでください。
+3. LINE DevelopersでWebhook URLに `https://<project-ref>.supabase.co/functions/v1/line-official` を登録し、「検証」を実行してWebhookを有効にします。公式LINE管理画面の自動応答を使っている場合は、運用したい応答内容を確認します。
+4. テスト用のLINEアカウントから公式アカウントへ新しい問い合わせを送り、Web版の受信箱で表示と確認付き返信を確認します。
+
+受信箱にはWebhook有効化後の問い合わせが入ります。定型文と確認付き送信はMacを起動せずに使えます。AI下書きはMac接続アプリ v3.2.0以降とOllamaが必要で、選択した会話の直近最大6件（各180文字まで）が既存のクラウド中継を通ります。添付は受信箱に種類の表示を残します。

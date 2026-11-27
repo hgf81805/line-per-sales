@@ -189,7 +189,7 @@ def make_handler(token, port, cloud=None, sender=None, attio=None, chat_index=No
             if self.headers.get('Host') != host:
                 return self.respond(403, {'error': '接続元を確認できません。127.0.0.1のURLを開いてください。'})
             assets = {'/cloud.js': ('text/javascript; charset=utf-8', 'cloud.js'), '/cloud-config.json': ('application/json; charset=utf-8', 'cloud-config.json'), '/send.js': ('text/javascript; charset=utf-8', 'send.js'), '/attio.js': ('text/javascript; charset=utf-8', 'attio.js'), '/pipeline.js': ('text/javascript; charset=utf-8', 'pipeline.js')}
-            for script in ('marked.umd.js','note-editor.js','sales-assist.js','sales-desk.js','settings.js','followups.js','push-settings.js','line-push-worker.js'):
+            for script in ('official.js','marked.umd.js','note-editor.js','sales-assist.js','sales-desk.js','settings.js','followups.js','push-settings.js','line-push-worker.js'):
                 assets['/'+script] = ('text/javascript; charset=utf-8', script)
             assets['/manifest.webmanifest'] = ('application/manifest+json', 'manifest.webmanifest')
             assets['/ui.css'] = ('text/css; charset=utf-8', 'ui.css')
@@ -497,6 +497,16 @@ def make_handler(token, port, cloud=None, sender=None, attio=None, chat_index=No
                     return self.respond(200, sender.send(token, data.get('ticket_id')))
                 if self.path == '/api/sales-assist':
                     mode = data.get('mode')
+                    if mode == 'official-draft':
+                        history = data.get('history')
+                        purpose = data.get('style')
+                        if (set(data)!={'mode','style','history'} or purpose not in ('consult','price','materials','receipt')
+                                or not isinstance(history,list) or not 1<=len(history)<=6
+                                or any(not isinstance(row,dict) or set(row)!={'direction','body'}
+                                       or row['direction'] not in ('in','out') or not isinstance(row['body'],str)
+                                       or len(row['body'])>180 for row in history)):
+                            raise ValueError('invalid official draft')
+                        return self.respond(200, {'draft':sales_assist.official_draft(history,purpose)})
                     if mode == 'later-check':
                         entries = data.get('later')
                         if not isinstance(entries,list) or len(entries)>12:
