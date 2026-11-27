@@ -184,6 +184,10 @@ async function cloudJob(action,payload){
   }
   if(action==='sales-assist'&&payload.mode==='meeting-brief'&&!device.capabilities?.includes('meeting-brief-v1'))throw new Error('商談前ブリーフにはMacアプリv2.4が必要です。');
   if(action==='sales-assist'&&payload.mode==='official-draft'&&!device.capabilities?.includes('official-draft-v1'))throw new Error('AI下書きにはMac接続アプリ v3.2.0 が必要です。');
+  if(action==='sales-assist'&&payload.mode==='official-draft'&&payload.variants&&!device.capabilities?.includes('official-draft-variants-v1')){
+    const {variants,...legacyPayload}=payload;
+    payload=legacyPayload;
+  }
   if(action==='sales-assist'&&payload.mode==='official-draft'&&!device.capabilities?.includes('official-draft-20-v1')){
     payload={...payload,history:payload.history.slice(-6).map(row=>({...row,body:row.body.slice(0,180)}))};
   }

@@ -11,6 +11,7 @@ const templates={
 };
 const make=(tag,text)=>{const element=document.createElement(tag);element.textContent=text;return element;};
 let accounts=[],accountId=null,records=[],recent=[],current=null,busy=false,review=null,viewGeneration=0;
+const candidates=$('officialCandidates');
 const status=$('officialStatus'), sendStatus=$('officialSendStatus'), field=$('officialText');
 const isEmail=()=>accounts.some(account=>account.id===accountId&&account.source==='email');
 function buttons(){
@@ -24,6 +25,7 @@ function buttons(){
   $('officialAI').disabled=busy||!current||!recent.length;
   $('officialReview').disabled=busy||!current||!field.value.trim();
   $('officialSend').disabled=busy;
+  for(const button of candidates.querySelectorAll('button'))button.disabled=busy||!current;
   for(const button of $('officialThreads').querySelectorAll('button'))button.disabled=busy;
 }
 function resetInbox(){
@@ -31,6 +33,7 @@ function resetInbox(){
   $('officialReplyLink').hidden=true;
   $('officialReplyLink').removeAttribute('href');
   $('officialHistory').replaceChildren();
+  candidates.replaceChildren();
   $('officialName').textContent='問い合わせを選んでください';
   status.textContent=sendStatus.textContent='';
   renderThreads();buttons();
@@ -164,7 +167,7 @@ function openThread(row){
   if(current?.line_user!==row.line_user&&field.value.trim()&&!confirm('編集中の下書きを破棄しますか？'))return;
   run(async valid=>{
     await history(row,valid);
-    if(valid()){field.value='';review=null;sendStatus.textContent='';}
+    if(valid()){field.value='';candidates.replaceChildren();review=null;sendStatus.textContent='';}
   });
 }
 $('officialLoad').onclick=load;
@@ -207,17 +210,32 @@ function draftHistory(){
   }
   return build(low);
 }
-$('officialAI').onclick=()=>{
-  if(field.value.trim()&&!confirm('下書きを置き換えますか？'))return;
-  run(async valid=>{
-    sendStatus.textContent='Macで下書きを作成中…';
-    const result=await window.lineOfficialDraft({style:$('officialTemplate').value,
-      history:draftHistory()});
-    if(!valid())return;
-    field.value=result.draft;
-    sendStatus.textContent=result.history_count?'直近'+result.history_count+'件をもとに下書きを作成しました。':'AIの下書きを入れました。';
-  },sendStatus);
-};
+$('officialAI').onclick=()=>run(async valid=>{
+  sendStatus.textContent='Macで返信案を作成中…';
+  const result=await window.lineOfficialDraft({style:$('officialTemplate').value,
+    history:draftHistory(),variants:true});
+  if(!valid())return;
+  const options=result.drafts
+    ? [['丁寧に',result.drafts.polite],['やわらかく',result.drafts.warm],['短く',result.drafts.short]]
+    : [['返信案',result.draft]];
+  candidates.replaceChildren(...options.map(([label,text])=>{
+    const card=make('section','');
+    card.className='candidate';
+    const body=make('p',text);
+    body.style.whiteSpace='pre-wrap';
+    const button=make('button','この候補を下書きに入れる');
+    button.type='button';
+    button.onclick=()=>{
+      if(field.value.trim()&&!confirm('編集中の下書きを置き換えますか？'))return;
+      field.value=text;buttons();field.focus();
+    };
+    card.append(make('h4',label),body,button);
+    return card;
+  }));
+  sendStatus.textContent=result.drafts
+    ? '直近'+result.history_count+'件から返信案を3つ作成しました。'
+    : '返信案を1つ作成しました。3案を使うにはMac接続アプリをv3.2.4に更新してください。';
+},sendStatus);
 $('officialMailForm').onsubmit=event=>{
   event.preventDefault();
   const mailbox=$('officialMailbox').value.trim().toLowerCase();

@@ -500,13 +500,15 @@ def make_handler(token, port, cloud=None, sender=None, attio=None, chat_index=No
                     if mode == 'official-draft':
                         history = data.get('history')
                         purpose = data.get('style')
-                        if (set(data)!={'mode','style','history'} or purpose not in ('consult','price','materials','receipt')
+                        variants = data.get('variants', False)
+                        if (set(data)-{'mode','style','history','variants'} or type(variants) is not bool or purpose not in ('consult','price','materials','receipt')
                                 or not isinstance(history,list) or not 1<=len(history)<=20
                                 or any(not isinstance(row,dict) or set(row)!={'direction','body'}
                                        or row['direction'] not in ('in','out') or not isinstance(row['body'],str)
                                        or len(row['body'])>1000 for row in history)):
                             raise ValueError('invalid official draft')
-                        return self.respond(200, {'draft':sales_assist.official_draft(history,purpose),'history_count':len(history)})
+                        draft = sales_assist.official_draft(history, purpose, variants)
+                        return self.respond(200, {('drafts' if variants else 'draft'):draft,'history_count':len(history)})
                     if mode == 'later-check':
                         entries = data.get('later')
                         if not isinstance(entries,list) or len(entries)>12:
