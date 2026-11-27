@@ -53,7 +53,7 @@ function importLstepNotifications() {
         const from = message.getFrom().trim().toLowerCase();
         const address = from.match(/<([^<>]+)>$/)?.[1] || from;
         if (address !== config.sender || !message.getSubject().includes(config.subject)) continue;
-        const body = message.getPlainBody().trim().slice(0,5000);
+        const body = message.getPlainBody().trim().slice(0,12000);
         if (!body) continue;
         const result = UrlFetchApp.fetch('https://zfwweszgsrovuiabvzye.supabase.co/functions/v1/line-official',{
           method:'post',contentType:'application/json',followRedirects:false,muteHttpExceptions:true,

@@ -27,6 +27,8 @@ function buttons(){
 }
 function resetInbox(){
   records=[];recent=[];current=null;review=null;field.value='';
+  $('officialReplyLink').hidden=true;
+  $('officialReplyLink').removeAttribute('href');
   $('officialHistory').replaceChildren();
   $('officialName').textContent='問い合わせを選んでください';
   status.textContent=sendStatus.textContent='';
@@ -120,6 +122,8 @@ async function load(){
       accounts=result.accounts;
       const emailAccount=accounts.find(account=>account.source==='email');
       if(emailAccount&&!$('officialMailbox').value)$('officialMailbox').value=emailAccount.mailbox;
+      if(!$('officialMailSender').value)$('officialMailSender').value='noreply@service.linestep.net';
+      if(!$('officialMailSubject').value)$('officialMailSubject').value='【通常メッセージ】';
       if(!accounts.length)throw new Error('公式LINEを接続するか、通知メールの取り込みを設定してください。');
       accountId=accounts[0].id;
       $('officialAccount').replaceChildren(...accounts.map(account=>new Option(account.label,account.id)));
@@ -138,6 +142,11 @@ async function history(row,valid){
   recent=result.messages;
   row.display_name=result.display_name;
   $('officialName').textContent=title(row);
+  const link=$('officialReplyLink');
+  const safeLink=isEmail()&&/^https:\/\/manager\.linestep\.net\/notification\/view\?type=member&id=\d{1,24}$/.test(result.reply_url||'');
+  link.hidden=!safeLink;
+  if(safeLink)link.href=result.reply_url;
+  else link.removeAttribute('href');
   $('officialPriority').textContent=row.priority?'優先リードを解除':'優先リードにする';
   $('officialHistory').replaceChildren(...result.messages.map(item=>{
     const line=make('div','');

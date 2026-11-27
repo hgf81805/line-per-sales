@@ -1,3 +1,4 @@
+import {parseLstepMail} from './lstep-mail.ts';
 import {createClient} from 'npm:@supabase/supabase-js@2.49.4';
 
 const env = (name: string) => Deno.env.get(name)?.trim() || '';
@@ -60,12 +61,14 @@ async function importMail(req:Request,raw:ArrayBuffer){
     return problem('通知メールの形式を確認してください。',400);
   }
   const account=mailAccount(importer.data.id);
-  const result=await service.rpc('line_official_accept_message',{
-    p_account:account,p_user:id,p_id:id,p_body:body.trim().slice(0,5000),p_at:new Date(received).toISOString(),
+  const parsed=parseLstepMail(body);
+  const threadId=parsed?'mail:'+await tokenHash(JSON.stringify([parsed.account,parsed.member])):id;
+  const displayName=parsed?(parsed.sender+' · '+parsed.account):subject.trim()||'Lステップ通知';
+  const result=await service.rpc('line_official_accept_mail',{
+    p_account:account,p_user:threadId,p_id:id,p_body:(parsed?.body||body.trim()).slice(0,5000),
+    p_at:new Date(received).toISOString(),p_name:displayName.slice(0,100),p_reply_url:parsed?.link||null,
   });
   check(result.error);
-  check((await threads().update({display_name:subject.trim().slice(0,100)||'Lステップ通知'})
-    .eq('account_id',account).eq('line_user',id)).error);
   return reply({accepted:true});
 }
 async function signatureMatches(signature:string, raw:ArrayBuffer, secret:string):Promise<boolean>{
@@ -172,7 +175,7 @@ Deno.serve(async req=>{
     }
     const id=data.line_user;
     if(isMail?typeof id!=='string'||!/^mail:[0-9a-f]{16,64}$/.test(id):!lineUser(id))return problem('相手を選び直してください。',400);
-    const thread=await threads().select('line_user,display_name').eq('account_id',account.id).eq('line_user',id).maybeSingle();
+    const thread=await threads().select('line_user,display_name,reply_url').eq('account_id',account.id).eq('line_user',id).maybeSingle();
     check(thread.error);
     if(!thread.data)return problem('問い合わせが見つかりません。',404);
     if(data.action==='history'){
@@ -193,7 +196,7 @@ Deno.serve(async req=>{
       const result=await messages().select('direction,body,created_at').eq('account_id',account.id).eq('line_user',id).eq('sent',true)
         .order('created_at',{ascending:false}).limit(50);
       check(result.error);
-      return reply({messages:result.data!.reverse(),display_name:displayName});
+      return reply({messages:result.data!.reverse(),display_name:displayName,reply_url:isMail?thread.data.reply_url:null});
     }
     if(data.action==='priority'&&typeof data.active==='boolean'){
       check((await threads().update({priority:data.active}).eq('account_id',account.id).eq('line_user',id)).error);
