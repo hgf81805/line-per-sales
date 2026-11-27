@@ -64,7 +64,7 @@ def activity_time(value):
         return 0
 
 
-def unread_line_events(token, since):
+def unread_line_events(token, since, hidden_chats=()):
     """Yield only hashes and timestamps for recent incoming LINE messages."""
     cursor = None
     seen = set()
@@ -77,6 +77,9 @@ def unread_line_events(token, since):
             cid = chat.get('id')
             if (not isinstance(cid,str) or not cid or chat.get('type') not in ('single','group')
                     or str(chat.get('network','')).lower()!='line' or chat.get('merge') or chat.get('mergedIntoChatID')):
+                continue
+            preference_id = 'group:'+cid if chat['type']=='group' else cid
+            if preference_id in hidden_chats:
                 continue
             activity = activity_time(chat.get('lastActivity') or chat.get('lastActivityAt') or chat.get('updatedAt'))
             if activity and activity < since:
