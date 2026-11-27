@@ -374,7 +374,6 @@ button[data-action="send"]  { --action-bg: #136957; --action-text: #fff; --actio
   .line-workspace .chat-mute-button { min-height: 44px; }
 }
 
-main.official-view > :not(.official-inbox) { display: none !important; }
 .official-inbox .grid { margin-top: 1rem; }
 .official-inbox .official-preview { white-space: pre-wrap; overflow-wrap: anywhere; }
 .official-inbox dialog { width: min(90vw, 32rem); border: 1px solid #b7cbc5; border-radius: 12px; }
