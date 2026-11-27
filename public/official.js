@@ -11,7 +11,12 @@ const templates={
 const make=(tag,text)=>{const element=document.createElement(tag);element.textContent=text;return element;};
 let accounts=[],accountId=null,records=[],recent=[],current=null,busy=false,review=null,viewGeneration=0;
 const status=$('officialStatus'), sendStatus=$('officialSendStatus'), field=$('officialText');
+const isEmail=()=>accounts.some(account=>account.id===accountId&&account.source==='email');
 function buttons(){
+  $('officialReview').hidden=isEmail();
+  $('officialCopy').hidden=$('officialDone').hidden=!isEmail();
+  $('officialCopy').disabled=busy||!current||!field.value.trim();
+  $('officialDone').disabled=busy||!current||!needsReply(current);
   $('officialAccount').disabled=busy||accounts.length<2;
   $('officialLoad').disabled=busy;
   $('officialInsert').disabled=$('officialPriority').disabled=field.disabled=busy||!current;
@@ -37,6 +42,8 @@ function switchView(){
   inbox.classList.toggle('hidden',!active);
   if(active){
     accounts=[];accountId=null;
+    $('officialMailKeyPanel').hidden=true;
+    $('officialMailKey').value='';
     $('officialAccount').replaceChildren();
     resetInbox();
     Promise.resolve(window.lineCloudReady).then(()=>{if(location.hash==='#official-line')load();});
@@ -72,7 +79,9 @@ async function load(){
       const result=await window.lineOfficialRequest({action:'accounts'});
       if(!valid())return;
       accounts=result.accounts;
-      if(!accounts.length)throw new Error('公式LINEアカウントを接続してください。');
+      const emailAccount=accounts.find(account=>account.source==='email');
+      if(emailAccount&&!$('officialMailbox').value)$('officialMailbox').value=emailAccount.mailbox;
+      if(!accounts.length)throw new Error('公式LINEを接続するか、通知メールの取り込みを設定してください。');
       accountId=accounts[0].id;
       $('officialAccount').replaceChildren(...accounts.map(account=>new Option(account.label,account.id)));
     }
@@ -145,9 +154,38 @@ $('officialAI').onclick=()=>{
     sendStatus.textContent='AIの下書きを入れました。';
   },sendStatus);
 };
+$('officialMailForm').onsubmit=event=>{
+  event.preventDefault();
+  const mailbox=$('officialMailbox').value.trim().toLowerCase();
+  if(accounts.some(account=>account.mailbox===mailbox&&account.key_created)&&!confirm('以前の取り込みキーを無効にして、新しく発行しますか？'))return;
+  run(async valid=>{
+    const result=await window.lineOfficialRequest({action:'mail_setup',mailbox});
+    if(!valid())return;
+    $('officialMailKey').value=result.key;
+    $('officialMailKeyPanel').hidden=false;
+    $('officialMailStatus').textContent='キーをコピーし、Gmail取り込みスクリプトの IMPORT_KEY に登録してください。';
+    accountId=null;
+  },$('officialMailStatus')).then(load);
+};
+$('officialMailCopyKey').onclick=async()=>{
+  try{await navigator.clipboard.writeText($('officialMailKey').value);$('officialMailStatus').textContent='取り込みキーをコピーしました。';}
+  catch{$('officialMailStatus').textContent='キーをコピーできませんでした。';}
+};
+$('officialCopy').onclick=async()=>{
+  try{await navigator.clipboard.writeText(field.value.trim());sendStatus.textContent='返信をコピーしました。Lステップの元のトークで送信してください。';}
+  catch{sendStatus.textContent='コピーできませんでした。本文を選択してコピーしてください。';}
+};
+$('officialDone').onclick=()=>run(async valid=>{
+  const row=current;
+  await accountRequest({action:'mark_done',line_user:row.line_user});
+  if(!valid())return;
+  row.replied_at=new Date().toISOString();
+  renderThreads();
+  sendStatus.textContent='対応済みにしました。';
+},sendStatus);
 field.oninput=buttons;
 $('officialReview').onclick=async()=>{
-  if(!current||busy||!field.value.trim())return;
+  if(!current||busy||isEmail()||!field.value.trim())return;
   const id=current.line_user,text=field.value.trim(),account=accountId;
   const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify([account,id,text])));
   if(inbox.classList.contains('hidden')||accountId!==account||current?.line_user!==id||field.value.trim()!==text||$('officialDialog').open)return;

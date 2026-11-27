@@ -380,3 +380,5 @@ main.official-view > :not(.official-inbox) { display: none !important; }
 .official-inbox dialog { width: min(90vw, 32rem); border: 1px solid #b7cbc5; border-radius: 12px; }
 
 .official-account { max-width: 24rem; margin-top: .65rem; }
+
+.official-inbox [hidden] { display: none !important; }

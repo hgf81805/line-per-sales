@@ -4,7 +4,7 @@ const env = (name: string) => Deno.env.get(name)?.trim() || '';
 const service = createClient(env('SUPABASE_URL'), env('SUPABASE_SERVICE_ROLE_KEY'), {auth:{persistSession:false}});
 const headers = {
   'Access-Control-Allow-Origin':'https://line-per-line.netlify.app',
-  'Access-Control-Allow-Headers':'authorization, apikey, content-type',
+  'Access-Control-Allow-Headers':'authorization, apikey, content-type, x-lstep-import',
   'Access-Control-Allow-Methods':'POST, OPTIONS',
   'Content-Type':'application/json',
   'Cache-Control':'no-store',
@@ -41,6 +41,33 @@ function configuredAccounts(): Account[] {
   return accounts;
 }
 
+const imports = () => service.from('line_official_mail_import');
+const mailAccount = (id:string) => 'mail-'+id;
+async function tokenHash(token:string){
+  const hash=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(token));
+  return Array.from(new Uint8Array(hash),byte=>byte.toString(16).padStart(2,'0')).join('');
+}
+async function importMail(req:Request,raw:ArrayBuffer){
+  const token=req.headers.get('x-lstep-import')||'';
+  if(!/^[0-9a-f]{64}$/.test(token))return problem('取り込みキーが無効です。',401);
+  const importer=await imports().select('id,mailbox').eq('token_hash',await tokenHash(token)).maybeSingle();
+  check(importer.error);
+  if(!importer.data)return problem('取り込みキーが無効です。',401);
+  const {id,subject,body,received_at,mailbox}=JSON.parse(new TextDecoder().decode(raw));
+  const received=typeof received_at==='string'?Date.parse(received_at):NaN;
+  if(mailbox!==importer.data.mailbox||typeof id!=='string'||!/^mail:[0-9a-f]{16,64}$/.test(id)||typeof subject!=='string'
+    ||typeof body!=='string'||!body.trim()||!Number.isFinite(received)||received>Date.now()+300000){
+    return problem('通知メールの形式を確認してください。',400);
+  }
+  const account=mailAccount(importer.data.id);
+  const result=await service.rpc('line_official_accept_message',{
+    p_account:account,p_user:id,p_id:id,p_body:body.trim().slice(0,5000),p_at:new Date(received).toISOString(),
+  });
+  check(result.error);
+  check((await threads().update({display_name:subject.trim().slice(0,100)||'Lステップ通知'})
+    .eq('account_id',account).eq('line_user',id)).error);
+  return reply({accepted:true});
+}
 async function signatureMatches(signature:string, raw:ArrayBuffer, secret:string):Promise<boolean>{
   if(!/^[A-Za-z0-9+/]{43}=$/.test(signature))return false;
   const key = await crypto.subtle.importKey('raw',new TextEncoder().encode(secret),
@@ -109,19 +136,34 @@ Deno.serve(async req=>{
   try{
     const raw=await req.arrayBuffer();
     if(raw.byteLength>300000)return problem('入力が大きすぎます。',413);
+    if(req.headers.has('x-lstep-import'))return await importMail(req,raw);
     if(req.headers.has('x-line-signature'))return await webhook(req,raw);
     const token=req.headers.get('Authorization')?.match(/^Bearer (\S+)$/i)?.[1];
     if(!token)return problem('ログインしてください。',401);
     const {data:{user}}=await service.auth.getUser(token);
     if(!user||user.is_anonymous)return problem('ログインしてください。',401);
-    const configured=configuredAccounts();
-    if(!configured.length)return problem('公式LINEの初回接続が必要です。',503);
-    const accounts=configured.filter(account=>account.owner_id===user.id);
-    if(!accounts.length)return problem('公式LINEの担当者アカウントで開いてください。',403);
     const data=JSON.parse(new TextDecoder().decode(raw));
-    if(data.action==='accounts')return reply({accounts:accounts.map(({id,label})=>({id,label}))});
-    const account=accounts.find(item=>item.id===(data.account_id??'default'));
-    if(!account)return problem('送信元の公式LINEを選び直してください。',403);
+    if(data.action==='mail_setup'){
+      const mailbox=typeof data.mailbox==='string'?data.mailbox.trim().toLowerCase():'';
+      if(!/^[a-z0-9._+%-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(mailbox)||mailbox.length>254)return problem('受信用Gmailを確認してください。',400);
+      const key=crypto.randomUUID().replaceAll('-','')+crypto.randomUUID().replaceAll('-','');
+      check((await imports().upsert({owner_id:user.id,mailbox,token_hash:await tokenHash(key)},{onConflict:'owner_id,mailbox'})).error);
+      return reply({key});
+    }
+    const mail=await imports().select('id,mailbox,token_hash').eq('owner_id',user.id);
+    check(mail.error);
+    const configured=configuredAccounts().filter(account=>account.owner_id===user.id);
+    const emailSources=mail.data!.map(row=>({id:mailAccount(row.id),label:'Lステップ通知 · '+row.mailbox,
+      source:'email',mailbox:row.mailbox,key_created:Boolean(row.token_hash)}));
+    if(data.action==='accounts'){
+      const accounts=configured.map(({id,label})=>({id,label,source:'line'}));
+      return reply({accounts:[...accounts,...emailSources]});
+    }
+    const emailSource=emailSources.find(item=>item.id===data.account_id);
+    const isMail=Boolean(emailSource);
+    const account=emailSource?{...emailSource,owner_id:user.id,destination:'',secret:'',access_token:''}
+      :configured.find(item=>item.id===(data.account_id??'default'));
+    if(!account)return problem('公式LINEや通知メールの受信元を設定してください。',403);
     if(data.action==='list'){
       const result=await threads().select('line_user,display_name,inbound_at,replied_at,priority').eq('account_id',account.id)
         .order('priority',{ascending:false}).order('inbound_at',{ascending:false}).limit(100);
@@ -129,13 +171,13 @@ Deno.serve(async req=>{
       return reply({threads:result.data});
     }
     const id=data.line_user;
-    if(!lineUser(id))return problem('相手を選び直してください。',400);
+    if(isMail?typeof id!=='string'||!/^mail:[0-9a-f]{16,64}$/.test(id):!lineUser(id))return problem('相手を選び直してください。',400);
     const thread=await threads().select('line_user,display_name').eq('account_id',account.id).eq('line_user',id).maybeSingle();
     check(thread.error);
     if(!thread.data)return problem('問い合わせが見つかりません。',404);
     if(data.action==='history'){
       let displayName=thread.data.display_name;
-      if(!displayName){
+      if(!displayName&&!isMail){
         try{
           const profile=await fetch('https://api.line.me/v2/bot/profile/'+id,{signal:AbortSignal.timeout(2500),
             headers:{Authorization:'Bearer '+account.access_token}});
@@ -157,7 +199,11 @@ Deno.serve(async req=>{
       check((await threads().update({priority:data.active}).eq('account_id',account.id).eq('line_user',id)).error);
       return reply({ok:true});
     }
-    if(data.action==='send')return await send(data,id,account);
+    if(data.action==='mark_done'&&isMail){
+      check((await threads().update({replied_at:new Date().toISOString()}).eq('account_id',account.id).eq('line_user',id)).error);
+      return reply({ok:true});
+    }
+    if(data.action==='send'&&!isMail&&lineUser(id))return await send(data,id,account);
     return problem('操作を確認してください。',400);
   }catch{
     return problem('公式LINEの処理を完了できませんでした。同じ送信内容で再確認してください。',502);
