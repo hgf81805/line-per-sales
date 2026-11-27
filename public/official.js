@@ -143,33 +143,52 @@ $('officialInsert').onclick=()=>{
     field.value=templates[$('officialTemplate').value];buttons();field.focus();
   }
 };
+function draftHistory(){
+  const rows=recent.slice(-20).map(({direction,body})=>({direction,characters:Array.from(body)}));
+  const build=limit=>rows.map(({direction,characters})=>({direction,body:characters.slice(0,limit).join('')}));
+  const encoder=new TextEncoder();
+  let low=1,high=1000;
+  while(low<high){
+    const middle=Math.ceil((low+high)/2);
+    if(encoder.encode(JSON.stringify(build(middle))).length<=7000)low=middle;
+    else high=middle-1;
+  }
+  return build(low);
+}
 $('officialAI').onclick=()=>{
   if(field.value.trim()&&!confirm('下書きを置き換えますか？'))return;
   run(async valid=>{
     sendStatus.textContent='Macで下書きを作成中…';
     const result=await window.lineOfficialDraft({style:$('officialTemplate').value,
-      history:recent.slice(-6).map(({direction,body})=>({direction,body:body.slice(0,180)}))});
+      history:draftHistory()});
     if(!valid())return;
     field.value=result.draft;
-    sendStatus.textContent='AIの下書きを入れました。';
+    sendStatus.textContent=result.history_count?'直近'+result.history_count+'件をもとに下書きを作成しました。':'AIの下書きを入れました。';
   },sendStatus);
 };
 $('officialMailForm').onsubmit=event=>{
   event.preventDefault();
   const mailbox=$('officialMailbox').value.trim().toLowerCase();
+  const sender=$('officialMailSender').value.trim().toLowerCase();
+  const subject=$('officialMailSubject').value.trim();
+  const interval=Number($('officialMailInterval').value);
+  if(!subject||/["\r\n]/.test(subject)){
+    $('officialMailStatus').textContent='件名に含まれる語句を確認してください。';
+    return;
+  }
   if(accounts.some(account=>account.mailbox===mailbox&&account.key_created)&&!confirm('以前の取り込みキーを無効にして、新しく発行しますか？'))return;
   run(async valid=>{
     const result=await window.lineOfficialRequest({action:'mail_setup',mailbox});
     if(!valid())return;
-    $('officialMailKey').value=result.key;
+    $('officialMailKey').value=JSON.stringify({key:result.key,mailbox,sender,subject,interval});
     $('officialMailKeyPanel').hidden=false;
-    $('officialMailStatus').textContent='キーをコピーし、Gmail取り込みスクリプトの IMPORT_KEY に登録してください。';
+    $('officialMailStatus').textContent='設定をコピーし、Apps Scriptのスクリプト プロパティ LSTEP_CONFIG に貼り付けてください。';
     accountId=null;
   },$('officialMailStatus')).then(load);
 };
 $('officialMailCopyKey').onclick=async()=>{
-  try{await navigator.clipboard.writeText($('officialMailKey').value);$('officialMailStatus').textContent='取り込みキーをコピーしました。';}
-  catch{$('officialMailStatus').textContent='キーをコピーできませんでした。';}
+  try{await navigator.clipboard.writeText($('officialMailKey').value);$('officialMailStatus').textContent='設定をコピーしました。';}
+  catch{$('officialMailStatus').textContent='設定をコピーできませんでした。';}
 };
 $('officialCopy').onclick=async()=>{
   try{await navigator.clipboard.writeText(field.value.trim());sendStatus.textContent='返信をコピーしました。Lステップの元のトークで送信してください。';}

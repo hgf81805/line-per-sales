@@ -1,5 +1,5 @@
 /**
- * Script properties: IMPORT_KEY, MAILBOX, LSTEP_SENDER, LSTEP_SUBJECT.
+ * Paste the configuration from the app into the LSTEP_CONFIG script property.
  * Run installLstepImport once, from the Gmail account that receives notifications.
  */
 function installLstepImport() {
@@ -10,20 +10,26 @@ function installLstepImport() {
   }
   importLstepNotifications();
   const old = ScriptApp.getProjectTriggers().filter(trigger => trigger.getHandlerFunction() === 'importLstepNotifications');
-  if (!old.length) ScriptApp.newTrigger('importLstepNotifications').timeBased().everyMinutes(5).create();
+  if (!old.length || properties.getProperty('LSTEP_INTERVAL') !== String(config.interval)) {
+    const trigger = ScriptApp.newTrigger('importLstepNotifications').timeBased().everyMinutes(config.interval).create();
+    for (const previous of old) if (previous.getUniqueId() !== trigger.getUniqueId()) ScriptApp.deleteTrigger(previous);
+    properties.setProperty('LSTEP_INTERVAL', String(config.interval));
+  }
 }
 function lstepConfig() {
   const values = PropertiesService.getScriptProperties().getProperties();
-  const mailbox = (values.MAILBOX || '').trim().toLowerCase();
-  const sender = (values.LSTEP_SENDER || '').trim().toLowerCase();
-  const subject = (values.LSTEP_SUBJECT || '').trim();
-  if (!/^[0-9a-f]{64}$/.test(values.IMPORT_KEY || '') ||
+  const bundled = values.LSTEP_CONFIG ? JSON.parse(values.LSTEP_CONFIG) : {};
+  const mailbox = (bundled.mailbox || values.MAILBOX || '').trim().toLowerCase();
+  const sender = (bundled.sender || values.LSTEP_SENDER || '').trim().toLowerCase();
+  const subject = (bundled.subject || values.LSTEP_SUBJECT || '').trim();
+  const key = bundled.key || values.IMPORT_KEY || '';
+  if (!/^[0-9a-f]{64}$/.test(key) ||
       !/^[a-z0-9._+%-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(sender) || !subject ||
       /["\r\n]/.test(subject)) throw Error('スクリプト プロパティを確認してください。');
   if (!mailbox || Session.getEffectiveUser().getEmail().toLowerCase() !== mailbox) {
     throw Error('通知を受信するGmailのアカウントで実行してください。');
   }
-  return {key:values.IMPORT_KEY, mailbox, sender, subject};
+  return {key, mailbox, sender, subject, interval:bundled.interval === 1 ? 1 : 5};
 }
 function importLstepNotifications() {
   const lock = LockService.getScriptLock();

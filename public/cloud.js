@@ -143,6 +143,9 @@ async function cloudJob(action,payload){
   }
   if(action==='sales-assist'&&payload.mode==='meeting-brief'&&!device.capabilities?.includes('meeting-brief-v1'))throw new Error('商談前ブリーフにはMacアプリv2.4が必要です。');
   if(action==='sales-assist'&&payload.mode==='official-draft'&&!device.capabilities?.includes('official-draft-v1'))throw new Error('AI下書きにはMac接続アプリ v3.2.0 が必要です。');
+  if(action==='sales-assist'&&payload.mode==='official-draft'&&!device.capabilities?.includes('official-draft-20-v1')){
+    payload={...payload,history:payload.history.slice(-6).map(row=>({...row,body:row.body.slice(0,180)}))};
+  }
   if(action==='chats'&&payload.count===15&&!device.capabilities?.includes('line-list-15-v1'))payload={...payload,count:10};
   if(action==='sales-assist'&&payload.mode==='later-check'&&!device.capabilities?.includes('later-chats-v1'))throw new Error('新着による復帰にはMacアプリv2.5が必要です。');
   const [job]=await raw('/rest/v1/line_remote_jobs',{user_id:session.user.id,device_id:activeDevice,action,payload},{headers:{Prefer:'return=representation'}});
