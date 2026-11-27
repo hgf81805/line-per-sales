@@ -61,7 +61,7 @@ main.official-view > :not(.official-inbox) { display: none !important; }
   .official-inbox #officialCopy { flex-basis: 100%; }
   .official-inbox .official-send-actions { padding-bottom: env(safe-area-inset-bottom); }
 }
-</style><link rel="stylesheet" href="/ui.css?v=official-login"><link rel="manifest" href="/manifest.webmanifest"></head><body>
+</style><link rel="stylesheet" href="/ui.css?v=mobile-workspace"><link rel="manifest" href="/manifest.webmanifest"></head><body>
 <header><small>つながる営業 / PERSONAL LINE</small><h1>LINE・返信</h1><nav aria-label="メインメニュー" style="display:flex;flex-wrap:wrap;gap:20px;margin-top:18px"><a href="#direct-line" id="directNav" style="color:white">LINE・返信</a><a href="/pipeline.html" style="color:white">営業工程</a><a href="/settings.html" style="color:white">設定</a><a href="#official-line" id="officialNav" style="color:white">公式LINE</a></nav></header>
 <main><section id="official-line" class="panel official-inbox hidden" aria-labelledby="officialHeading">
 <h2 id="officialHeading">公式LINE</h2>
@@ -126,4 +126,4 @@ $('disconnectMac').onclick=async()=>{try{await request('disconnect',{});}catch(e
 $('loadHistory').onclick=async()=>{messageId=null;conversationVersion=null;$('candidates').textContent='';$('history').textContent='';try{const data=await request('conversation',{chat_id:selected.id});messageId=data.message_id;conversationVersion=data.conversation_version||null;$('history').innerHTML=data.messages.length?data.messages.map(m=>`<div class="message ${m.speaker==='自分'?'mine':''}"><small>${esc(m.speaker)}</small>${esc(m.text)}</div>`).join(''):'テキストの会話がありません。';$('status').textContent=messageId?'会話を読み込みました。返信候補を生成できます。':'最新が相手のテキスト発言ではないため、返信候補は生成できません。';controls();}catch(e){}};
 $('suggest').onclick=async()=>{$('candidates').textContent='';try{const data=await request('suggest',{chat_id:selected.id,message_id:messageId});$('candidates').innerHTML=data.candidates.map((text,i)=>`<div class="candidate"><h3>候補${i+1} · ${['丁寧','親しみやすい','簡潔'][i]}</h3><p>${esc(text)}</p><small class="muted">本文を編集し、確認画面から送信できます。</small></div>`).join('');$('status').textContent='Mac内のOllamaで生成しました。送信操作は行っていません。';}catch(e){messageId=null;conversationVersion=null;controls();}};
 }
-</script><script src="/cloud.js?v=official-variants"></script><script src="/send.js?v=group-tools"></script><script src="/attio.js?v=tokyo"></script><script src="/sales-desk.js?v=chat-mute"></script><script src="/sales-assist.js?v=filters"></script><script src="/followups.js?v=tokyo"></script><script src="/official.js?v=mobile-inbox"></script></body></html>
+</script><script src="/cloud.js?v=official-variants"></script><script src="/send.js?v=group-tools"></script><script src="/attio.js?v=tokyo"></script><script src="/sales-desk.js?v=chat-mute"></script><script src="/sales-assist.js?v=filters"></script><script src="/followups.js?v=tokyo"></script><script src="/official.js?v=lstep-web-reply"></script></body></html>

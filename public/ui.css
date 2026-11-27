@@ -383,3 +383,74 @@ button[data-action="send"]  { --action-bg: #136957; --action-text: #fff; --actio
 .official-inbox [hidden] { display: none !important; }
 
 #officialLoginForm { max-width: 28rem; }
+
+.settings-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+.settings-choice label { display: flex; align-items: center; gap: .5rem; min-height: 36px; }
+.settings-choice input { width: 1.125rem; height: 1.125rem; flex: none; accent-color: var(--accent); }
+.settings-local summary { cursor: pointer; font-weight: 700; }
+.settings-page #cloudLogout, .settings-page #pushDisable, .settings-page #attioDisconnect {
+  color: #783b45;
+  background: #fbf0f2;
+  border-color: #e7c8cf;
+}
+@media (max-width: 760px) {
+  body > header { padding: .8rem .75rem; }
+  body > header h1 { margin: .2rem 0; font-size: 1.2rem; }
+  body > header nav[aria-label="メインメニュー"] {
+    display: grid !important;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: .2rem !important;
+    margin-top: .45rem !important;
+  }
+  body > header nav[aria-label="メインメニュー"] a {
+    display: grid;
+    place-items: center;
+    padding: .35rem .15rem !important;
+    min-height: 44px;
+    font-size: .82rem;
+    text-align: center;
+  }
+  main { padding: .65rem; }
+  .panel { padding: .85rem; margin-bottom: .75rem; }
+  .panel :is(h2, h3) { overflow-wrap: anywhere; }
+  .panel h2 { font-size: 1.05rem; }
+  .muted { color: #526a61; }
+  .line-workspace .grid,
+  .pipeline-page #directoryCards { grid-template-columns: minmax(0, 1fr); gap: .75rem; }
+  .line-workspace :is(.panel, .chat-button, .mobile-chat-row, .desk-option),
+  .pipeline-page :is(.toolbar > div, .deal-card, .lane) { min-width: 0; overflow-wrap: anywhere; }
+  .line-workspace :is(button, .desk-search-row input, .desk-field select),
+  #sendDialog button, #groupSendDialog button { min-height: 42px; }
+  .line-workspace .mobile-chat-menu { max-width: min(75vw, 15rem); }
+  .line-workspace :is(input:not([type=checkbox]), select, textarea),
+  .settings-page :is(input:not([type=checkbox]), select),
+  .pipeline-page :is(input, select, textarea) {
+    box-sizing: border-box;
+    max-width: 100%;
+    min-width: 0;
+    min-height: 42px;
+    font-size: 16px !important;
+  }
+  .line-workspace .mobile-reply-bar { z-index: 5; }
+  .line-workspace .mobile-reply-bar button { min-height: 42px; }
+  #sendDialog, #groupSendDialog {
+    max-width: calc(100% - 1.5rem);
+    max-height: 85dvh;
+    overflow: auto;
+    overflow-wrap: anywhere;
+  }
+  .pipeline-page .toolbar { display: grid; grid-template-columns: minmax(0, 1fr); gap: .6rem; }
+  .pipeline-page .toolbar :is(input, select) { width: 100%; }
+  .pipeline-page :is(.board, #directoryCards) { grid-template-columns: minmax(0, 1fr); gap: .65rem; }
+  .pipeline-page :is(.lane, .deal-card) { padding: .75rem; }
+  .pipeline-page :is(#boardNotice, #agendaStatus, #directoryNotice, #directoryError):empty { display: none; }
+  .settings-page .notice { padding: .65rem; }
+  .settings-page :is(input:not([type=checkbox]), select) {
+    border: 1px solid #adbfba;
+    border-radius: .55rem;
+    background: #fff;
+    color: #19332d;
+  }
+  .settings-page #pairCode { display: block; margin-bottom: .5rem; }
+  .settings-page .settings-actions > button { max-width: 100%; }
+}

@@ -15,13 +15,16 @@ let accounts=[],accountId=null,records=[],recent=[],current=null,busy=false,revi
 const candidates=$('officialCandidates');
 const status=$('officialStatus'), sendStatus=$('officialSendStatus'), field=$('officialText');
 const isEmail=()=>accounts.some(account=>account.id===accountId&&account.source==='email');
-const lstepReplyUrl=value=>/^https:\/\/manager\.linestep\.net\/notification\/view\?type=member&id=\d{1,24}$/.test(value||'')?value:null;
+function lstepReplyUrl(value){
+  const member=/^https:\/\/manager\.linestep\.net\/notification\/view\?type=member&id=(\d{1,24})$/.exec(value||'')?.[1];
+  return member ? 'https://manager.linestep.net/line/visual?show=detail&member='+member : null;
+}
 function buttons(){
   $('officialReview').hidden=isEmail();
   $('officialCopy').hidden=$('officialDone').hidden=!isEmail();
   const copy=$('officialCopy');
   copy.disabled=busy||!current||!field.value.trim();
-  copy.textContent=lstepReplyUrl($('officialReplyLink').getAttribute('href'))
+  copy.textContent=$('officialReplyLink').hasAttribute('href')
     ? '返信をコピーしてLステップを開く' : '返信をコピー';
   $('officialDone').disabled=busy||!current||!needsReply(current);
   $('officialAccount').disabled=busy||accounts.length<2;
@@ -291,7 +294,7 @@ $('officialMailCopyKey').onclick=async()=>{
 $('officialCopy').onclick=()=>{
   const text=field.value.trim();
   if(!isEmail()||!current||!text)return;
-  const link=lstepReplyUrl($('officialReplyLink').getAttribute('href'));
+  const link=$('officialReplyLink').getAttribute('href');
   run(async valid=>{
     try{await navigator.clipboard.writeText(text);}
     catch{
