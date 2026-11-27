@@ -128,7 +128,7 @@ Mac内の画面でリモート接続へログインしている必要があり�
 
 ## 公式LINEの受信箱
 
-公式LINEは、Web版の「公式LINE」から開きます。接続先は1チャネルで、担当者を既存のSupabaseログイン1件に指定します。
+公式LINEは、Web版の「公式LINE」から開きます。複数のチャネルを接続できます。各チャネルの担当者を既存のSupabaseログインに指定します。
 
 1. 公式アカウントでMessaging APIを有効にします。
 2. SupabaseのEdge Function Secretsに `LINE_OFFICIAL_CHANNEL_SECRET`、`LINE_OFFICIAL_CHANNEL_ACCESS_TOKEN`、`LINE_OFFICIAL_OWNER_ID`（担当者のSupabase AuthenticationユーザーID）を登録します。値はGitHubやブラウザー用設定に含めないでください。
@@ -136,3 +136,23 @@ Mac内の画面でリモート接続へログインしている必要があり�
 4. テスト用のLINEアカウントから公式アカウントへ新しい問い合わせを送り、Web版の受信箱で表示と確認付き返信を確認します。
 
 受信箱にはWebhook有効化後の問い合わせが入ります。定型文と確認付き送信はMacを起動せずに使えます。AI下書きはMac接続アプリ v3.2.0以降とOllamaが必要で、選択した会話の直近最大6件（各180文字まで）が既存のクラウド中継を通ります。添付は受信箱に種類の表示を残します。
+
+
+### 2件目以降の公式LINE
+
+Edge Function Secrets に `LINE_OFFICIAL_ACCOUNTS` を追加します。値は下記の形のJSON配列です。実際のシークレットやトークンはダッシュボードで入力します。
+
+```json
+[
+  {
+    "id": "sales",
+    "label": "営業窓口",
+    "destination": "公式LINEのボットユーザーID",
+    "secret": "チャネルシークレット",
+    "access_token": "チャネルアクセストークン",
+    "owner_id": "担当者のSupabase AuthenticationユーザーID"
+  }
+]
+```
+
+`destination` は Messaging API のボット情報にある `userId` です。各チャネルには同じWebhook URLを登録します。既存の3つのシークレットで接続したアカウントは `default` です。そのアカウントを新しい配列へ移す場合は `id` を `default` にします。履歴はIDごとに保存されるため、運用開始後はIDを固定します。

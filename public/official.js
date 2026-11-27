@@ -9,9 +9,10 @@ const templates={
   receipt:'お問い合わせありがとうございます。内容を確認して、担当者からご案内します。'
 };
 const make=(tag,text)=>{const element=document.createElement(tag);element.textContent=text;return element;};
-let records=[],recent=[],current=null,busy=false,review=null,viewGeneration=0;
+let accounts=[],accountId=null,records=[],recent=[],current=null,busy=false,review=null,viewGeneration=0;
 const status=$('officialStatus'), sendStatus=$('officialSendStatus'), field=$('officialText');
 function buttons(){
+  $('officialAccount').disabled=busy||accounts.length<2;
   $('officialLoad').disabled=busy;
   $('officialInsert').disabled=$('officialPriority').disabled=field.disabled=busy||!current;
   $('officialAI').disabled=busy||!current||!recent.length;
@@ -19,17 +20,25 @@ function buttons(){
   $('officialSend').disabled=busy;
   for(const button of $('officialThreads').querySelectorAll('button'))button.disabled=busy;
 }
+function resetInbox(){
+  records=[];recent=[];current=null;review=null;field.value='';
+  $('officialHistory').replaceChildren();
+  $('officialName').textContent='問い合わせを選んでください';
+  status.textContent=sendStatus.textContent='';
+  renderThreads();buttons();
+}
+function accountRequest(data){
+  return window.lineOfficialRequest({...data,account_id:accountId});
+}
 function switchView(){
   const active=location.hash==='#official-line';
   viewGeneration++;
   main.classList.toggle('official-view',active);
   inbox.classList.toggle('hidden',!active);
   if(active){
-    records=[];recent=[];current=null;review=null;field.value='';
-    $('officialHistory').replaceChildren();
-    $('officialName').textContent='問い合わせを選んでください';
-    status.textContent=sendStatus.textContent='';
-    renderThreads();buttons();
+    accounts=[];accountId=null;
+    $('officialAccount').replaceChildren();
+    resetInbox();
     Promise.resolve(window.lineCloudReady).then(()=>{if(location.hash==='#official-line')load();});
   }else if($('officialDialog').open)$('officialDialog').close();
 }
@@ -59,7 +68,15 @@ async function run(action,errorTarget=status){
 async function load(){
   await run(async valid=>{
     status.textContent='取得中…';
-    const result=await window.lineOfficialRequest({action:'list'});
+    if(!accountId){
+      const result=await window.lineOfficialRequest({action:'accounts'});
+      if(!valid())return;
+      accounts=result.accounts;
+      if(!accounts.length)throw new Error('公式LINEアカウントを接続してください。');
+      accountId=accounts[0].id;
+      $('officialAccount').replaceChildren(...accounts.map(account=>new Option(account.label,account.id)));
+    }
+    const result=await accountRequest({action:'list'});
     if(!valid())return;
     records=result.threads;
     renderThreads();
@@ -67,7 +84,7 @@ async function load(){
   });
 }
 async function history(row,valid){
-  const result=await window.lineOfficialRequest({action:'history',line_user:row.line_user});
+  const result=await accountRequest({action:'history',line_user:row.line_user});
   if(!valid())return;
   current=row;
   recent=result.messages;
@@ -90,10 +107,22 @@ function openThread(row){
   });
 }
 $('officialLoad').onclick=load;
+$('officialAccount').onchange=()=>{
+  const next=$('officialAccount').value;
+  if(busy||!accounts.some(account=>account.id===next))return;
+  if(field.value.trim()&&!confirm('編集中の下書きを破棄してアカウントを切り替えますか？')){
+    $('officialAccount').value=accountId;
+    return;
+  }
+  accountId=next;
+  resetInbox();
+  load();
+};
+
 $('officialPending').onchange=()=>{renderThreads();buttons();};
 $('officialPriority').onclick=()=>run(async valid=>{
   const row=current;
-  await window.lineOfficialRequest({action:'priority',line_user:row.line_user,active:!row.priority});
+  await accountRequest({action:'priority',line_user:row.line_user,active:!row.priority});
   if(!valid())return;
   row.priority=!row.priority;
   $('officialPriority').textContent=row.priority?'優先リードを解除':'優先リードにする';
@@ -119,24 +148,24 @@ $('officialAI').onclick=()=>{
 field.oninput=buttons;
 $('officialReview').onclick=async()=>{
   if(!current||busy||!field.value.trim())return;
-  const id=current.line_user,text=field.value.trim();
-  const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify([id,text])));
-  if(inbox.classList.contains('hidden')||current?.line_user!==id||field.value.trim()!==text||$('officialDialog').open)return;
+  const id=current.line_user,text=field.value.trim(),account=accountId;
+  const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify([account,id,text])));
+  if(inbox.classList.contains('hidden')||accountId!==account||current?.line_user!==id||field.value.trim()!==text||$('officialDialog').open)return;
   const key='official-send:'+Array.from(new Uint8Array(digest),byte=>byte.toString(16).padStart(2,'0')).join('');
   const requestId=sessionStorage.getItem(key)||crypto.randomUUID();
-  review={id,text,key,requestId};
-  $('officialRecipient').textContent=title(current)+' · LINE公式アカウント';
+  review={id,text,key,requestId,account};
+  $('officialRecipient').textContent=title(current)+' · 送信元 '+accounts.find(item=>item.id===account)?.label;
   $('officialBody').textContent=text;
   $('officialDialog').showModal();
 };
 $('officialCancel').onclick=()=>$('officialDialog').close();
 $('officialSend').onclick=()=>run(async valid=>{
   const pending=review,row=current;
-  if(!pending||row?.line_user!==pending.id)return;
+  if(!pending||row?.line_user!==pending.id||accountId!==pending.account)return;
   sessionStorage.setItem(pending.key,pending.requestId);
   $('officialDialog').close();
   sendStatus.textContent='送信中…';
-  await window.lineOfficialRequest({action:'send',line_user:pending.id,text:pending.text,request_id:pending.requestId});
+  await accountRequest({action:'send',line_user:pending.id,text:pending.text,request_id:pending.requestId});
   sessionStorage.removeItem(pending.key);
   if(!valid())return;
   review=null;field.value='';
