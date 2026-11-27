@@ -3,6 +3,7 @@
 const main=document.querySelector('main');
 const inbox=$('official-line');
 const officialActive=()=>location.hash!=='#direct-line';
+const mobileInbox=matchMedia('(max-width: 760px)');
 const templates={
   consult:'お問い合わせありがとうございます。ご相談内容と、ご都合のよい日時をいくつか教えていただけますか？',
   price:'お問い合わせありがとうございます。料金をご案内しますので、ご希望の内容やご利用予定を教えていただけますか？',
@@ -34,6 +35,7 @@ function buttons(){
 }
 function resetInbox(){
   records=[];recent=[];current=null;review=null;field.value='';
+  inbox.classList.remove('official-detail-open');
   $('officialReplyLink').hidden=true;
   $('officialReplyLink').removeAttribute('href');
   $('officialHistory').replaceChildren();
@@ -167,13 +169,35 @@ async function history(row,valid){
   }));
   renderThreads();
 }
+function showMobileThread(){
+  inbox.classList.add('official-detail-open');
+  if(mobileInbox.matches){
+    $('officialName').focus({preventScroll:true});
+    inbox.scrollIntoView({block:'start'});
+  }
+}
 function openThread(row){
-  if(current?.line_user!==row.line_user&&field.value.trim()&&!confirm('編集中の下書きを破棄しますか？'))return;
+  if(current?.line_user===row.line_user&&mobileInbox.matches&&!inbox.classList.contains('official-detail-open')){
+    showMobileThread();
+    return;
+  }
+  if(field.value.trim()&&!confirm('編集中の下書きを破棄しますか？'))return;
   run(async valid=>{
     await history(row,valid);
-    if(valid()){field.value='';candidates.replaceChildren();review=null;sendStatus.textContent='';}
+    if(valid()){
+      field.value='';candidates.replaceChildren();review=null;sendStatus.textContent='';
+      showMobileThread();
+    }
   });
 }
+$('officialListBack').onclick=()=>{
+  if(busy)return;
+  inbox.classList.remove('official-detail-open');
+  const selected=$('officialThreads').querySelector('.selected');
+  (selected||$('officialLoad')).focus({preventScroll:true});
+  if(selected)selected.scrollIntoView({block:'nearest'});
+  else inbox.scrollIntoView({block:'start'});
+};
 $('officialLoad').onclick=load;
 $('officialAccount').onchange=()=>{
   const next=$('officialAccount').value;
