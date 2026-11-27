@@ -57,7 +57,7 @@ $('officialLoginForm').onsubmit=async event=>{
   button.disabled=true;
   $('officialAuthStatus').textContent='ログイン中…';
   try{
-    await window.lineOfficialLogin($('officialLoginEmail').value.trim(),password.value);
+    await window.lineOfficialLogin($('officialLoginEmail').value.trim(),password.value,$('officialKeepLogin').checked);
     password.value='';
     $('officialAuthStatus').textContent='';
     if(officialActive()&&showOfficialAccess())load();

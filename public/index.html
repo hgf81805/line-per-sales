@@ -16,6 +16,7 @@
     <p>「つながる営業」の設定で使っているアカウントでログインできます。</p>
     <label for="officialLoginEmail">メールアドレス<input id="officialLoginEmail" type="email" autocomplete="username" required></label>
     <label for="officialLoginPassword">パスワード<input id="officialLoginPassword" type="password" autocomplete="current-password" required></label>
+    <label><input id="officialKeepLogin" type="checkbox"> この端末でログインを保持する</label>
     <div class="reply-actions"><button id="officialLoginButton" type="submit" class="primary">ログインして受信箱を開く</button></div>
   </form>
   <div id="officialLocalAuth" hidden>
@@ -70,4 +71,4 @@ $('disconnectMac').onclick=async()=>{try{await request('disconnect',{});}catch(e
 $('loadHistory').onclick=async()=>{messageId=null;conversationVersion=null;$('candidates').textContent='';$('history').textContent='';try{const data=await request('conversation',{chat_id:selected.id});messageId=data.message_id;conversationVersion=data.conversation_version||null;$('history').innerHTML=data.messages.length?data.messages.map(m=>`<div class="message ${m.speaker==='自分'?'mine':''}"><small>${esc(m.speaker)}</small>${esc(m.text)}</div>`).join(''):'テキストの会話がありません。';$('status').textContent=messageId?'会話を読み込みました。返信候補を生成できます。':'最新が相手のテキスト発言ではないため、返信候補は生成できません。';controls();}catch(e){}};
 $('suggest').onclick=async()=>{$('candidates').textContent='';try{const data=await request('suggest',{chat_id:selected.id,message_id:messageId});$('candidates').innerHTML=data.candidates.map((text,i)=>`<div class="candidate"><h3>候補${i+1} · ${['丁寧','親しみやすい','簡潔'][i]}</h3><p>${esc(text)}</p><small class="muted">本文を編集し、確認画面から送信できます。</small></div>`).join('');$('status').textContent='Mac内のOllamaで生成しました。送信操作は行っていません。';}catch(e){messageId=null;conversationVersion=null;controls();}};
 }
-</script><script src="/cloud.js?v=official-login"></script><script src="/send.js?v=group-tools"></script><script src="/attio.js?v=tokyo"></script><script src="/sales-desk.js?v=chat-mute"></script><script src="/sales-assist.js?v=filters"></script><script src="/followups.js?v=tokyo"></script><script src="/official.js?v=default-official"></script></body></html>
+</script><script src="/cloud.js?v=keep-login"></script><script src="/send.js?v=group-tools"></script><script src="/attio.js?v=tokyo"></script><script src="/sales-desk.js?v=chat-mute"></script><script src="/sales-assist.js?v=filters"></script><script src="/followups.js?v=tokyo"></script><script src="/official.js?v=keep-login"></script></body></html>

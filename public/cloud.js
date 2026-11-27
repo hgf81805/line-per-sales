@@ -8,6 +8,11 @@ const panel = document.getElementById('cloudPanel');
 const notice = text => { const target=$('cloudNotice')||$('status'); if(target)target.textContent=text; };
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const storageKey = 'line-remote-auth-v1';
+const persistentKey = storageKey + '-persistent';
+let keepLogin = false;
+function readPersistentSession(){
+  try{return JSON.parse(localStorage.getItem(persistentKey));}catch{return null;}
+}
 const deviceKey='line-selected-device';
 function rememberedDevice(){
   try{return sessionStorage.getItem(deviceKey);}catch{return null;}
@@ -18,11 +23,29 @@ function rememberDevice(id){
     else sessionStorage.removeItem(deviceKey);
   }catch{}
 }
-function forgetSession(){session=null;rememberDevice(null);try{sessionStorage.removeItem(storageKey);}catch(e){}}
+function forgetSession(){
+  session=null;rememberDevice(null);
+  try{sessionStorage.removeItem(storageKey);}catch{}
+  if(keepLogin){try{localStorage.removeItem(persistentKey);}catch{}}
+  keepLogin=false;
+}
 function saveSession(data){
   if(!data.access_token||!data.refresh_token||!data.user?.id||data.user.is_anonymous)throw new Error('メールで登録したアカウントでログインしてください。');
   session={access_token:data.access_token,refresh_token:data.refresh_token,user:data.user,expires_at:Date.now()+(data.expires_in||3600)*1000};
-  try{sessionStorage.setItem(storageKey,JSON.stringify(session));}catch(e){}
+  try{
+    if(keepLogin){
+      localStorage.setItem(persistentKey,JSON.stringify(session));
+      sessionStorage.removeItem(storageKey);
+    }else sessionStorage.setItem(storageKey,JSON.stringify(session));
+  }catch{
+    keepLogin=false;
+    try{sessionStorage.setItem(storageKey,JSON.stringify(session));}catch{}
+  }
+}
+function startSession(data,remember){
+  keepLogin=remember;
+  saveSession(data);
+  if(!keepLogin){try{localStorage.removeItem(persistentKey);}catch{}}
 }
 async function raw(path, body, {method='POST',auth=true,headers={}}={}){
   if(auth)await accessToken();
@@ -34,8 +57,26 @@ async function raw(path, body, {method='POST',auth=true,headers={}}={}){
 async function accessToken(){
   if(!session)throw new Error('ログインしてください。');
   if(session.expires_at>Date.now()+60000)return session.access_token;
-  if(!refreshPromise)refreshPromise=raw('/auth/v1/token?grant_type=refresh_token',{refresh_token:session.refresh_token},{auth:false}).then(saveSession).catch(error=>{forgetSession();resetRemote();throw error;}).finally(()=>{refreshPromise=null;});
-  await refreshPromise;return session.access_token;
+  if(!refreshPromise){
+    const refresh=async()=>{
+      if(keepLogin){
+        const shared=readPersistentSession();
+        if(!shared||shared.user.id!==session?.user.id)throw new Error('ログインしてください。');
+        session=shared;
+        if(session.expires_at>Date.now()+60000)return;
+      }
+      const previous=session;
+      const data=await raw('/auth/v1/token?grant_type=refresh_token',{refresh_token:previous.refresh_token},{auth:false});
+      if(session!==previous||(keepLogin&&readPersistentSession()?.refresh_token!==previous.refresh_token))return;
+      saveSession(data);
+    };
+    refreshPromise=(keepLogin&&navigator.locks?navigator.locks.request(persistentKey,refresh):refresh())
+      .catch(error=>{if(keepLogin&&readPersistentSession()?.user.id!==session?.user.id)keepLogin=false;forgetSession();resetRemote();throw error;})
+      .finally(()=>{refreshPromise=null;});
+  }
+  await refreshPromise;
+  if(!session)throw new Error('ログインしてください。');
+  return session.access_token;
 }
 function resetRemote(){
   generation++;cloudActive=false;activeDevice=null;selected=null;messageId=null;conversationVersion=null;
@@ -174,11 +215,12 @@ request=async function(path,body,quiet=false){
   try{return await cloudJob(path,body);}catch(e){$('error').textContent=e.message;throw e;}
   finally{busy=false;controls();$('status').textContent='';}
 };
-window.lineOfficialLogin=async function(email,password){
+window.lineOfficialLogin=async function(email,password,remember=false){
   if(local)throw new Error('公開版の公式LINE画面でログインしてください。');
   await window.lineCloudReady;
   if(!config)throw new Error('クラウド設定を確認できません。再読み込みしてください。');
-  saveSession(await raw('/auth/v1/token?grant_type=password',{email,password},{auth:false}));
+  const data=await raw('/auth/v1/token?grant_type=password',{email,password},{auth:false});
+  startSession(data,remember);
   void loggedIn().catch(error=>notice(error.message));
 };
 window.lineOfficialSignedIn=()=>!local&&Boolean(session?.user?.id);
@@ -221,7 +263,8 @@ $('cloudLogin').onsubmit=async event=>{
   const email=$('cloudEmail').value.trim(),password=$('cloudPassword').value;
   try{
     if(local){await localRequest('cloud/enroll',{email,password});$('cloudPassword').value='';await localStatus();}
-    else{saveSession(await raw('/auth/v1/token?grant_type=password',{email,password},{auth:false}));
+    else{const data=await raw('/auth/v1/token?grant_type=password',{email,password},{auth:false});
+      startSession(data,$('cloudKeepLogin').checked);
       try{
         if($('cloudRememberEmail')?.checked)localStorage.setItem('line-login-email',email);
         else localStorage.removeItem('line-login-email');
@@ -232,7 +275,7 @@ $('cloudSignup').onclick=async()=>{
   const email=$('cloudEmail').value.trim(),password=$('cloudPassword').value;
   if(!email||password.length<8){notice('メールアドレスと8文字以上のパスワードを入力してください。');return;}
   $('cloudSignup').disabled=true;
-  try{const data=await raw('/auth/v1/signup',{email,password},{auth:false});$('cloudPassword').value='';if(data.access_token){saveSession(data);await loggedIn();}else notice('確認メールを開いて登録を完了したあと、この画面でログインしてください。すでに同じSupabaseプロジェクトのアカウントがあれば、そのアカウントでログインできます。');}
+  try{const data=await raw('/auth/v1/signup',{email,password},{auth:false});$('cloudPassword').value='';if(data.access_token){startSession(data,!local&&$('cloudKeepLogin').checked);await loggedIn();}else notice('確認メールを開いて登録を完了したあと、この画面でログインしてください。すでに同じSupabaseプロジェクトのアカウントがあれば、そのアカウントでログインできます。');}
   catch(e){notice(e.message);}finally{$('cloudSignup').disabled=false;}
 };
 $('cloudUse').onclick=()=>{
@@ -271,14 +314,26 @@ async function initialize(){
     panel?.classList.remove('hidden');
     if($('cloudRememberEmail')){
       $('cloudRememberEmailLabel').hidden=local;
+      $('cloudKeepLoginLabel').hidden=local;
       if(!local&&!$('cloudEmail').value){
         try{$('cloudEmail').value=localStorage.getItem('line-login-email')||'';}catch{}
       }
     }
     if(local&&panel){$('cloudTitle').textContent='スマホ・別PCから使うための設定';$('cloudLoginButton').textContent='ログインしてこのMacを登録';$('cloudSignup').classList.add('hidden');await localStatus();deviceTimer=setInterval(()=>localStatus().catch(e=>notice(e.message)),15000);}
-    else if(!local){try{session=JSON.parse(sessionStorage.getItem(storageKey));}catch(e){}if(session){await accessToken();await loggedIn();}}
+    else if(!local){
+      try{session=JSON.parse(sessionStorage.getItem(storageKey));}catch{}
+      if(!session){session=readPersistentSession();keepLogin=Boolean(session);}
+      if(session){await accessToken();await loggedIn();}
+    }
   }catch(e){notice(e.message);}
 }
+window.addEventListener('storage',event=>{
+  if(local||event.key!==persistentKey||!keepLogin)return;
+  const shared=readPersistentSession();
+  if(!shared||shared.user.id!==session?.user.id){
+    keepLogin=false;forgetSession();resetRemote();location.reload();
+  }else if(!refreshPromise)session=shared;
+});
 window.addEventListener('pageshow',event=>{if(event.persisted)location.reload();});
 window.lineCloudReady=initialize();
 })();
