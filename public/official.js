@@ -14,10 +14,14 @@ let accounts=[],accountId=null,records=[],recent=[],current=null,busy=false,revi
 const candidates=$('officialCandidates');
 const status=$('officialStatus'), sendStatus=$('officialSendStatus'), field=$('officialText');
 const isEmail=()=>accounts.some(account=>account.id===accountId&&account.source==='email');
+const lstepReplyUrl=value=>/^https:\/\/manager\.linestep\.net\/notification\/view\?type=member&id=\d{1,24}$/.test(value||'')?value:null;
 function buttons(){
   $('officialReview').hidden=isEmail();
   $('officialCopy').hidden=$('officialDone').hidden=!isEmail();
-  $('officialCopy').disabled=busy||!current||!field.value.trim();
+  const copy=$('officialCopy');
+  copy.disabled=busy||!current||!field.value.trim();
+  copy.textContent=lstepReplyUrl($('officialReplyLink').getAttribute('href'))
+    ? '返信をコピーしてLステップを開く' : '返信をコピー';
   $('officialDone').disabled=busy||!current||!needsReply(current);
   $('officialAccount').disabled=busy||accounts.length<2;
   $('officialLoad').disabled=busy;
@@ -150,7 +154,7 @@ async function history(row,valid){
   row.display_name=result.display_name;
   $('officialName').textContent=title(row);
   const link=$('officialReplyLink');
-  const safeLink=isEmail()&&/^https:\/\/manager\.linestep\.net\/notification\/view\?type=member&id=\d{1,24}$/.test(result.reply_url||'');
+  const safeLink=isEmail()&&lstepReplyUrl(result.reply_url);
   link.hidden=!safeLink;
   if(safeLink)link.href=result.reply_url;
   else link.removeAttribute('href');
@@ -260,9 +264,23 @@ $('officialMailCopyKey').onclick=async()=>{
   try{await navigator.clipboard.writeText($('officialMailKey').value);$('officialMailStatus').textContent='設定をコピーしました。';}
   catch{$('officialMailStatus').textContent='設定をコピーできませんでした。';}
 };
-$('officialCopy').onclick=async()=>{
-  try{await navigator.clipboard.writeText(field.value.trim());sendStatus.textContent='返信をコピーしました。Lステップの元のトークで送信してください。';}
-  catch{sendStatus.textContent='コピーできませんでした。本文を選択してコピーしてください。';}
+$('officialCopy').onclick=()=>{
+  const text=field.value.trim();
+  if(!isEmail()||!current||!text)return;
+  const link=lstepReplyUrl($('officialReplyLink').getAttribute('href'));
+  run(async valid=>{
+    try{await navigator.clipboard.writeText(text);}
+    catch{
+      if(valid()){
+        sendStatus.textContent='コピーできませんでした。本文を手動でコピーしてから、Lステップの返信先を開いてください。';
+      }
+      return;
+    }
+    if(!valid())return;
+    sendStatus.textContent='返信をコピーしました。';
+    if(link)location.assign(link);
+    else sendStatus.textContent+='Lステップの元のトークで貼り付けてください。';
+  },sendStatus);
 };
 $('officialDone').onclick=()=>run(async valid=>{
   const row=current;
