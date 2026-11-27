@@ -13,7 +13,7 @@ export function validEndpoint(value:unknown): value is string {
 function check(error: {code?:string}|null){if(error)throw Error('database');}
 
 export async function deliverPush(service:SupabaseClient,userId:string,eventId:string,
-  notification:{body:string;path:string;sender?:unknown},endpoint?:string){
+  notification:{body:string;path:string;sender?:unknown;preview?:unknown},endpoint?:string){
   const devices=service.from('line_push_devices');
   let targets=devices.select('endpoint,subscription').eq('user_id',userId);
   if(endpoint)targets=targets.eq('endpoint',endpoint);
@@ -29,7 +29,11 @@ export async function deliverPush(service:SupabaseClient,userId:string,eventId:s
   const sender=typeof notification.sender==='string'
     ? Array.from(notification.sender.replace(/[\s\u0000-\u001f\u007f]+/g,' ').trim()).slice(0,80).join('')
     : '';
-  const payload=JSON.stringify({title:'つながる営業',body:notification.body,path:notification.path,...(sender?{sender}:{})});
+  const previewCharacters=typeof notification.preview==='string'
+    ? Array.from(notification.preview.replace(/[\s\u0000-\u001f\u007f]+/g,' ').trim())
+    : [];
+  const preview=previewCharacters.slice(0,100).join('')+(previewCharacters.length>100?'…':'');
+  const payload=JSON.stringify({title:'つながる営業',body:notification.body,path:notification.path,...(sender?{sender}:{}),...(preview?{preview}:{})});
   const outcomes=await Promise.all(found.data.map(async row=>{
     if(!validEndpoint(row.endpoint)||row.subscription?.endpoint!==row.endpoint)return false;
     try{

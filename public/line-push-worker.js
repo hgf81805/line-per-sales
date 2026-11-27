@@ -25,8 +25,12 @@ self.addEventListener('push', event=>{
   const path=notificationPath(payload.path);
   const notification=lineNotifications[path];
   const sender=typeof payload.sender==='string'?payload.sender.trim():'';
+  const preview=typeof payload.preview==='string'?payload.preview.trim():'';
+  let body=notification?.body||payload.body||'営業フォローを確認してください。';
+  if(notification&&preview)body=sender?sender+'：'+preview:preview;
+  else if(notification&&sender)body=sender+'さんからメッセージが届きました。';
   event.waitUntil(self.registration.showNotification(notification?.title||'つながる営業',{
-    body:notification&&sender?sender+'さんからメッセージが届きました。':notification?.body||payload.body||'営業フォローを確認してください。',
+    body,
     icon:'/apple-touch-icon.png',
     tag:notification?.tag||'line-sales-followup',
     data:{path}
