@@ -35,6 +35,45 @@ function resetInbox(){
 function accountRequest(data){
   return window.lineOfficialRequest({...data,account_id:accountId});
 }
+function showOfficialAccess(){
+  const signedIn=window.lineOfficialSignedIn?.()===true;
+  $('officialAuth').hidden=signedIn;
+  $('officialLoginForm').hidden=local;
+  $('officialLocalAuth').hidden=!local;
+  $('officialInboxContent').hidden=!signedIn;
+  if(!signedIn&&!local&&!$('officialLoginEmail').value){
+    try{$('officialLoginEmail').value=localStorage.getItem('line-login-email')||'';}catch{}
+  }
+  return signedIn;
+}
+$('officialLoginForm').onsubmit=async event=>{
+  event.preventDefault();
+  const password=$('officialLoginPassword');
+  const button=$('officialLoginButton');
+  if(button.disabled)return;
+  button.disabled=true;
+  $('officialAuthStatus').textContent='ログイン中…';
+  try{
+    await window.lineOfficialLogin($('officialLoginEmail').value.trim(),password.value);
+    password.value='';
+    $('officialAuthStatus').textContent='';
+    if(location.hash==='#official-line'&&showOfficialAccess())load();
+  }catch(error){
+    password.value='';
+    $('officialAuthStatus').textContent=error.message;
+  }finally{button.disabled=false;}
+};
+window.addEventListener('connectionchange',()=>{
+  if(location.hash==='#official-line'&&!window.lineOfficialSignedIn?.()){
+    viewGeneration++;
+    accounts=[];accountId=null;
+    $('officialMailKeyPanel').hidden=true;
+    $('officialMailKey').value='';
+    if($('officialDialog').open)$('officialDialog').close();
+    resetInbox();
+    showOfficialAccess();
+  }
+});
 function switchView(){
   const active=location.hash==='#official-line';
   viewGeneration++;
@@ -46,7 +85,7 @@ function switchView(){
     $('officialMailKey').value='';
     $('officialAccount').replaceChildren();
     resetInbox();
-    Promise.resolve(window.lineCloudReady).then(()=>{if(location.hash==='#official-line')load();});
+    Promise.resolve(window.lineCloudReady).then(()=>{if(location.hash==='#official-line'&&showOfficialAccess())load();});
   }else if($('officialDialog').open)$('officialDialog').close();
 }
 function time(value){return new Date(value).toLocaleString('ja-JP',{timeZone:'Asia/Tokyo'});}

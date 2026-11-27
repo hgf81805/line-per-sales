@@ -382,3 +382,5 @@ main.official-view > :not(.official-inbox) { display: none !important; }
 .official-account { max-width: 24rem; margin-top: .65rem; }
 
 .official-inbox [hidden] { display: none !important; }
+
+#officialLoginForm { max-width: 28rem; }

@@ -174,6 +174,14 @@ request=async function(path,body,quiet=false){
   try{return await cloudJob(path,body);}catch(e){$('error').textContent=e.message;throw e;}
   finally{busy=false;controls();$('status').textContent='';}
 };
+window.lineOfficialLogin=async function(email,password){
+  if(local)throw new Error('公開版の公式LINE画面でログインしてください。');
+  await window.lineCloudReady;
+  if(!config)throw new Error('クラウド設定を確認できません。再読み込みしてください。');
+  saveSession(await raw('/auth/v1/token?grant_type=password',{email,password},{auth:false}));
+  void loggedIn().catch(error=>notice(error.message));
+};
+window.lineOfficialSignedIn=()=>!local&&Boolean(session?.user?.id);
 window.lineOfficialDraft=data=>cloudJob('sales-assist',{mode:'official-draft',...data});
 window.lineOfficialRequest=async function(data){
   if(!session||!config)throw new Error('設定ページでログインしてください。');
