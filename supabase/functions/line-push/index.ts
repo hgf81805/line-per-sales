@@ -45,7 +45,9 @@ Deno.serve(async req=>{
         return reply({error:'この端末の通知情報を登録できません。'},400);
       }
       const allowed={endpoint:entry.endpoint,keys:{p256dh:entry.keys.p256dh,auth:entry.keys.auth}};
-      const result=await devices.upsert({user_id:userId,endpoint:entry.endpoint,subscription:allowed});
+      const label=typeof data.label==='string'?data.label.trim().slice(0,40):'';
+      const result=await devices.upsert({user_id:userId,endpoint:entry.endpoint,subscription:allowed,
+        ...(label?{device_label:label}:{}),registered_at:new Date().toISOString()});
       check(result.error);
       return reply({enabled:true});
     }
@@ -59,6 +61,28 @@ Deno.serve(async req=>{
       const result=await devices.select('endpoint').eq('user_id',userId).limit(1);
       check(result.error);
       return reply({enabled:Boolean(result.data?.length)});
+    }
+    const validId=(value:unknown)=>typeof value==='string'&&/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value);
+    if(data.action==='list_devices'){
+      if(data.after!==undefined&&!validId(data.after))return reply({error:'一覧を開き直してください。'},400);
+      let query=devices.select('device_id,device_label,registered_at,endpoint').eq('user_id',userId);
+      if(data.after)query=query.gt('device_id',data.after);
+      const result=await query.order('device_id').limit(51);
+      check(result.error);
+      const rows=result.data??[];
+      const items=rows.slice(0,50).map(row=>({
+        id:row.device_id,
+        label:row.device_label||(row.endpoint.includes('.push.apple.com/')?'Apple端末':'ブラウザ'),
+        registered_at:row.registered_at,
+        current:row.endpoint===data.endpoint,
+      }));
+      return reply({items,next:rows.length>50?items[49].id:null});
+    }
+    if(data.action==='remove_device'){
+      if(!validId(data.id))return reply({error:'通知先を選び直してください。'},400);
+      const result=await devices.delete().eq('user_id',userId).eq('device_id',data.id);
+      check(result.error);
+      return reply({removed:true});
     }
     if(data.action==='status'){
       const endpoint=data.endpoint;

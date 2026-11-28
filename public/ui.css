@@ -454,3 +454,7 @@ button[data-action="send"]  { --action-bg: #136957; --action-text: #fff; --actio
   .settings-page #pairCode { display: block; margin-bottom: .5rem; }
   .settings-page .settings-actions > button { max-width: 100%; }
 }
+
+#pushDeviceList { list-style: none; padding: 0; }
+#pushDeviceList li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .4rem; padding: .55rem 0; border-bottom: 1px solid var(--line); }
+#pushDeviceList li button { color: #783b45; background: #fbf0f2; border-color: #e7c8cf; }
