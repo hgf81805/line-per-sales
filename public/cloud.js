@@ -47,11 +47,36 @@ function startSession(data,remember){
   saveSession(data);
   if(!keepLogin){try{localStorage.removeItem(persistentKey);}catch{}}
 }
+function authErrorMessage(path,status,code){
+  if(status===429)return 'ログイン操作が続いたため、しばらく待ってから再試行してください。';
+  if(code==='email_not_confirmed')return '登録時に届いた確認メールを開いてからログインしてください。';
+  if(code==='user_banned')return 'このアカウントのログインは停止されています。';
+  if(path==='/auth/v1/token?grant_type=password'&&code==='invalid_credentials'){
+    return 'つながる営業のメールアドレスとパスワードを確認してください。「パスワードを表示」で自動入力された内容も確認できます。';
+  }
+  return '認証処理に失敗しました。時間をおいて再試行してください。';
+}
+for(const toggle of document.querySelectorAll('[data-show-password]')){
+  const field=$(toggle.dataset.showPassword);
+  toggle.onclick=()=>{
+    const visible=field.type==='password';
+    field.type=visible?'text':'password';
+    toggle.textContent=visible?'パスワードを隠す':'パスワードを表示';
+    toggle.setAttribute('aria-pressed',String(visible));
+  };
+}
 async function raw(path, body, {method='POST',auth=true,headers={}}={}){
   if(auth)await accessToken();
   const res=await fetch(config.url+path,{method,cache:'no-store',credentials:'omit',signal:AbortSignal.timeout(25000),headers:{apikey:config.key,'Content-Type':'application/json',...(auth?{Authorization:'Bearer '+session.access_token}:{}),...headers},...(body===undefined?{}:{body:JSON.stringify(body)})});
   const text=await res.text();let data;try{data=text?JSON.parse(text):null;}catch(e){throw new Error('クラウドの応答を確認できません。');}
-  if(!res.ok){if(auth&&res.status===401){forgetSession();resetRemote();}throw new Error(res.status===401||res.status===400&&path.startsWith('/auth/')?'ログイン情報とメール確認の完了を確認してください。':data?.msg||data?.message||'クラウド接続に失敗しました。');}
+  if(!res.ok){
+    if(auth&&res.status===401){
+      forgetSession();resetRemote();
+      throw new Error('ログインの有効期限が切れました。設定からログインし直してください。');
+    }
+    if(path.startsWith('/auth/'))throw new Error(authErrorMessage(path,res.status,data?.error_code||data?.code));
+    throw new Error(data?.msg||data?.message||'クラウド接続に失敗しました。');
+  }
   return data;
 }
 async function accessToken(){
@@ -223,7 +248,7 @@ window.lineOfficialLogin=async function(email,password,remember=false){
   if(local)throw new Error('公開版の公式LINE画面でログインしてください。');
   await window.lineCloudReady;
   if(!config)throw new Error('クラウド設定を確認できません。再読み込みしてください。');
-  const data=await raw('/auth/v1/token?grant_type=password',{email,password},{auth:false});
+  const data=await raw('/auth/v1/token?grant_type=password',{email:email.trim().toLowerCase(),password},{auth:false});
   startSession(data,remember);
   void loggedIn().catch(error=>notice(error.message));
 };
@@ -267,7 +292,7 @@ $('cloudLogin').onsubmit=async event=>{
   const email=$('cloudEmail').value.trim(),password=$('cloudPassword').value;
   try{
     if(local){await localRequest('cloud/enroll',{email,password});$('cloudPassword').value='';await localStatus();}
-    else{const data=await raw('/auth/v1/token?grant_type=password',{email,password},{auth:false});
+    else{const data=await raw('/auth/v1/token?grant_type=password',{email:email.trim().toLowerCase(),password},{auth:false});
       startSession(data,$('cloudKeepLogin').checked);
       try{
         if($('cloudRememberEmail')?.checked)localStorage.setItem('line-login-email',email);
@@ -279,7 +304,7 @@ $('cloudSignup').onclick=async()=>{
   const email=$('cloudEmail').value.trim(),password=$('cloudPassword').value;
   if(!email||password.length<8){notice('メールアドレスと8文字以上のパスワードを入力してください。');return;}
   $('cloudSignup').disabled=true;
-  try{const data=await raw('/auth/v1/signup',{email,password},{auth:false});$('cloudPassword').value='';if(data.access_token){startSession(data,!local&&$('cloudKeepLogin').checked);await loggedIn();}else notice('確認メールを開いて登録を完了したあと、この画面でログインしてください。すでに同じSupabaseプロジェクトのアカウントがあれば、そのアカウントでログインできます。');}
+  try{const data=await raw('/auth/v1/signup',{email:email.trim().toLowerCase(),password},{auth:false});$('cloudPassword').value='';if(data.access_token){startSession(data,!local&&$('cloudKeepLogin').checked);await loggedIn();}else notice('確認メールを開いて登録を完了したあと、この画面でログインしてください。すでに同じSupabaseプロジェクトのアカウントがあれば、そのアカウントでログインできます。');}
   catch(e){notice(e.message);}finally{$('cloudSignup').disabled=false;}
 };
 $('cloudUse').onclick=()=>{
