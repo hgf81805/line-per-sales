@@ -64,7 +64,12 @@ Deno.serve(async req=>{
     const isTest=data.action==='test';
     if(isTest&&!validEndpoint(data.endpoint))return reply({error:'先に通知をオンにしてください。'},400);
     const bucket=Math.floor(Date.now()/60000);
-    const eventId=isTest?'test-'+bucket:String(data.event_id||'');
+    let eventId=String(data.event_id||'');
+    if(isTest){
+      const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(data.endpoint));
+      const endpointId=Array.from(new Uint8Array(digest),byte=>byte.toString(16).padStart(2,'0')).join('');
+      eventId='test-'+bucket+'-'+endpointId;
+    }
     if(!isTest&&!/^[0-9a-f]{64}$/.test(eventId))return reply({error:'無効な通知です。'},400);
     const isLine=!isTest&&data.kind==='line';
     return reply(await deliverPush(service,userId,eventId,{
