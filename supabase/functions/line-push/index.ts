@@ -60,12 +60,25 @@ Deno.serve(async req=>{
       check(result.error);
       return reply({enabled:Boolean(result.data?.length)});
     }
-    if(data.action!=='publish'&&data.action!=='test')return reply({error:'操作を確認してください。'},400);
-    const isTest=data.action==='test';
-    if(isTest&&!validEndpoint(data.endpoint))return reply({error:'先に通知をオンにしてください。'},400);
+    if(data.action==='status'){
+      const endpoint=data.endpoint;
+      if(endpoint!==undefined&&!validEndpoint(endpoint))return reply({error:'無効な通知先です。'},400);
+      const [total,current]=await Promise.all([
+        devices.select('endpoint',{count:'exact',head:true}).eq('user_id',userId),
+        endpoint?service.from('line_push_devices').select('endpoint').eq('user_id',userId).eq('endpoint',endpoint).maybeSingle():null,
+      ]);
+      check(total.error);
+      if(current)check(current.error);
+      return reply({registered:Boolean(current?.data),count:total.count??0});
+    }
+    if(data.action!=='publish'&&data.action!=='test'&&data.action!=='test_all')return reply({error:'操作を確認してください。'},400);
+    const onlyThisDevice=data.action==='test';
+    const isTest=onlyThisDevice||data.action==='test_all';
+    if(onlyThisDevice&&!validEndpoint(data.endpoint))return reply({error:'先に通知をオンにしてください。'},400);
     const bucket=Math.floor(Date.now()/60000);
     let eventId=String(data.event_id||'');
-    if(isTest){
+    if(data.action==='test_all')eventId='test-all-'+bucket;
+    if(onlyThisDevice){
       const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(data.endpoint));
       const endpointId=Array.from(new Uint8Array(digest),byte=>byte.toString(16).padStart(2,'0')).join('');
       eventId='test-'+bucket+'-'+endpointId;
@@ -77,6 +90,6 @@ Deno.serve(async req=>{
       path:isLine?'/#direct-line':'/pipeline.html#today-agenda',
       sender:isLine?data.sender:undefined,
       preview:isLine?data.preview:undefined,
-    },isTest?data.endpoint:undefined));
+    },onlyThisDevice?data.endpoint:undefined));
   }catch{return reply({error:'通知の処理ができませんでした。時間をおいて再試行してください。'},500);}
 });

@@ -25,7 +25,7 @@ export async function deliverPush(service:SupabaseClient,userId:string,eventId:s
     return result.data??[];
   }
   let targets=await findDevices();
-  if(!targets.length)return {sent:0};
+  if(!targets.length)return {sent:0,attempted:0};
   const keys=await service.from('line_push_keys').select('public_key,private_key').eq('user_id',userId).single();
   check(keys.error);
   const delivery=service.from('line_push_delivery');
@@ -53,10 +53,11 @@ export async function deliverPush(service:SupabaseClient,userId:string,eventId:s
       return false;
     }
   }
-  let sent=0;
+  let sent=0, attempted=0;
   try{
     while(targets.length){
       const outcomes=await Promise.all(targets.map(send));
+      attempted+=targets.length;
       sent+=outcomes.filter(Boolean).length;
       if(endpoint||targets.length<batchSize)break;
       targets=await findDevices(targets[targets.length-1].endpoint);
@@ -67,5 +68,5 @@ export async function deliverPush(service:SupabaseClient,userId:string,eventId:s
   }
   if(!sent)await delivery.delete().eq('user_id',userId).eq('event_id',eventId);
   else await delivery.delete().eq('user_id',userId).lt('created_at',new Date(Date.now()-8*86400000).toISOString());
-  return {sent};
+  return {sent,attempted};
 }
